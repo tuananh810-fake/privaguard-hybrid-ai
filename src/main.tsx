@@ -12,9 +12,12 @@ createRoot(document.getElementById('root')!).render(
 if (import.meta.env.PROD && typeof window !== 'undefined' && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     const registerSw = () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {
-        // Ignore service worker registration errors in restricted contexts
-      });
+      navigator.serviceWorker
+        .register('/sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update().catch(() => {}))
+        .catch(() => {
+          // Ignore service worker registration errors in restricted contexts
+        });
     };
     const idleWin = window as unknown as {
       requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;

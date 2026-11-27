@@ -1,4 +1,4 @@
-const CACHE_NAME = 'privaguard-shell-v6.2.1';
+const CACHE_NAME = 'privaguard-shell-v6.2.2';
 const APP_SHELL_URLS = [
   '/',
   '/index.html',
@@ -36,7 +36,9 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL_URLS))
+      .then((cache) =>
+        cache.addAll(APP_SHELL_URLS.map((url) => new Request(url, { cache: 'reload' })))
+      )
       .then(() => self.skipWaiting())
   );
 });
@@ -63,10 +65,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigation requests: network-first, fall back to cached app shell when offline
+  // Navigation requests: network-first (bypass stale HTTP cache), fall back to cached app shell when offline
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: 'no-cache' })
         .then((response) => {
           if (response.ok) {
             const copy = response.clone();
