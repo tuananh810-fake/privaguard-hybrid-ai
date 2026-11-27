@@ -14,6 +14,7 @@ import { db } from '../firebase';
 
 export interface SavedAnalysis {
   id: string;
+  workspaceId: string;
   task: string;
   inferenceSource: string;
   modelUsed: string;
@@ -27,12 +28,27 @@ export interface SavedAnalysis {
 }
 
 const COLLECTION = 'privaguard_analyses';
+const WORKSPACE_STORAGE_KEY = 'privaguard_workspace_id';
+
+export function getWorkspaceId(): string {
+  if (typeof localStorage === 'undefined') return 'default-session';
+  let id = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+  if (!id) {
+    id =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, id);
+  }
+  return id;
+}
 
 export async function saveAnonymizedAnalysis(
-  entry: Omit<SavedAnalysis, 'id' | 'createdAt'>
+  entry: Omit<SavedAnalysis, 'id' | 'workspaceId' | 'createdAt'>
 ): Promise<string> {
   const ref = await addDoc(collection(db, COLLECTION), {
     ...entry,
+    workspaceId: getWorkspaceId(),
     createdAt: serverTimestamp(),
   });
   return ref.id;
@@ -44,16 +60,19 @@ export async function deleteSavedAnalysis(id: string): Promise<void> {
 
 export function subscribeRecentAnalyses(
   onData: (items: SavedAnalysis[]) => void,
-  onError?: (err: Error) => void
+  onError?: (err: Error) => void,
+  onlyMyWorkspace = true
 ): () => void {
-  const q = query(collection(db, COLLECTION), orderBy('createdAt', 'desc'), limit(8));
+  const myWorkspaceId = getWorkspaceId();
+  const q = query(collection(db, COLLECTION), orderBy('createdAt', 'desc'), limit(24));
   return onSnapshot(
     q,
     (snap) => {
-      const items: SavedAnalysis[] = snap.docs.map((dSnap) => {
+      const all: SavedAnalysis[] = snap.docs.map((dSnap) => {
         const d = dSnap.data();
         return {
           id: dSnap.id,
+          workspaceId: String(d.workspaceId || 'legacy'),
           task: String(d.task || 'executive'),
           inferenceSource: String(d.inferenceSource || 'UNKNOWN'),
           modelUsed: String(d.modelUsed || ''),
@@ -66,7 +85,10 @@ export function subscribeRecentAnalyses(
           createdAt: (d.createdAt as Timestamp) || null,
         };
       });
-      onData(items);
+      const filtered = onlyMyWorkspace
+        ? all.filter((item) => item.workspaceId === myWorkspaceId)
+        : all;
+      onData(filtered.slice(0, 8));
     },
     (err) => {
       if (onError) onError(err);

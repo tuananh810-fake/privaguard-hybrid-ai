@@ -55,6 +55,7 @@ import {
   subscribeRecentAnalyses,
 } from './services/historyStore';
 import { HighlightedRedactedText, RichOutput } from './components/RichOutput';
+import { ImageRedactorModal } from './components/ImageRedactorModal';
 
 const MODE_OPTIONS: { key: ModeKey; label: string; desc: string }[] = [
   { key: 'PREFER_ON_DEVICE', label: 'Prefer On-Device', desc: 'Gemini Nano first → Cloud fallback' },
@@ -85,6 +86,8 @@ export default function App() {
   const [customTerms, setCustomTerms] = useState('Nguyen Tuan Anh, Sarah Jenkins, David Chen');
   const [categories, setCategories] = useState<CategoryFilter>(DEFAULT_CATEGORY_FILTER);
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
+  const [imageMaskCount, setImageMaskCount] = useState(0);
+  const [showImageRedactor, setShowImageRedactor] = useState(false);
   const [mode, setMode] = useState<ModeKey>('PREFER_ON_DEVICE');
   const [task, setTask] = useState<AnalysisTask>('risk_audit');
 
@@ -212,6 +215,8 @@ export default function App() {
         base64Data,
         previewUrl: dataUrl,
       });
+      setImageMaskCount(0);
+      setShowImageRedactor(true);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -329,7 +334,7 @@ export default function App() {
                   #BuildHybridAI 2026
                 </span>
                 <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-500/30">
-                  v2.0
+                  v2.1
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -551,21 +556,43 @@ export default function App() {
             />
 
             {attachedImage && (
-              <div className="mt-2 flex items-center justify-between rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-xs">
-                <div className="flex items-center gap-2 truncate">
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-xs">
+                <div className="flex min-w-0 items-center gap-2">
                   <img
                     src={attachedImage.previewUrl}
                     alt={attachedImage.name}
-                    className="h-7 w-7 rounded object-cover"
+                    className="h-7 w-7 shrink-0 rounded object-cover"
                   />
-                  <span className="truncate text-indigo-200">{attachedImage.name}</span>
+                  <div className="min-w-0">
+                    <div className="truncate text-indigo-200">{attachedImage.name}</div>
+                    <div
+                      className={`text-[10px] ${
+                        imageMaskCount > 0 ? 'text-emerald-300' : 'text-amber-300'
+                      }`}
+                    >
+                      {imageMaskCount > 0
+                        ? `Locally Masked (${imageMaskCount} bar${imageMaskCount > 1 ? 's' : ''})`
+                        : 'Unmasked — click Redact to blur/hide private regions'}
+                    </div>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setAttachedImage(null)}
-                  className="text-slate-400 hover:text-rose-300"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setShowImageRedactor(true)}
+                    className="rounded-md bg-emerald-500/20 px-2 py-1 text-[11px] font-medium text-emerald-300 ring-1 ring-emerald-500/40 hover:bg-emerald-500/30"
+                  >
+                    Redact Image
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAttachedImage(null);
+                      setImageMaskCount(0);
+                    }}
+                    className="text-slate-400 hover:text-rose-300"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             )}
 
@@ -885,6 +912,19 @@ export default function App() {
           )}
         </section>
       </main>
+
+      {/* Local Image Privacy Redactor Modal */}
+      {showImageRedactor && attachedImage && (
+        <ImageRedactorModal
+          image={attachedImage}
+          onApply={(redactedImg, count) => {
+            setAttachedImage(redactedImg);
+            setImageMaskCount((prev) => prev + count);
+            setShowImageRedactor(false);
+          }}
+          onClose={() => setShowImageRedactor(false)}
+        />
+      )}
 
       {/* Localhost App Check Debug Token Helper Modal */}
       {showDebugModal && (
