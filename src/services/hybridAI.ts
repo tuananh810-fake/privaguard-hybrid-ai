@@ -1,4 +1,4 @@
-import { getGenerativeModel, InferenceMode, Part, Schema } from 'firebase/ai';
+import { getGenerativeModel, InferenceMode, OnDeviceParams, Part, Schema } from 'firebase/ai';
 import { ai } from '../firebase';
 import {
   AnalysisTask,
@@ -176,6 +176,19 @@ function isRateLimitOrTransientError(err: unknown): boolean {
   );
 }
 
+function buildOnDeviceParams(systemInstruction: string): OnDeviceParams {
+  return {
+    createOptions: {
+      initialPrompts: [
+        {
+          role: 'system',
+          content: [{ type: 'text', value: systemInstruction }],
+        },
+      ],
+    },
+  };
+}
+
 async function runSingleStream(
   parts: Array<string | Part>,
   modeKey: ModeKey,
@@ -187,12 +200,14 @@ async function runSingleStream(
   signal?: AbortSignal
 ): Promise<HybridResponse> {
   let ttftMs = 0;
+  const systemInstruction = getSystemInstruction(systemPromptStyle);
 
   const model = getGenerativeModel(ai, {
     mode: toInferenceMode(modeKey),
+    onDeviceParams: buildOnDeviceParams(systemInstruction),
     inCloudParams: {
       model: cloudModel,
-      systemInstruction: getSystemInstruction(systemPromptStyle),
+      systemInstruction,
       ...(useStructuredAudit && modeKey !== 'ONLY_ON_DEVICE'
         ? {
             generationConfig: {
@@ -255,9 +270,10 @@ async function runSingleStream(
     }
     const fallbackModel = getGenerativeModel(ai, {
       mode: toInferenceMode(modeKey),
+      onDeviceParams: buildOnDeviceParams(systemInstruction),
       inCloudParams: {
         model: cloudModel,
-        systemInstruction: getSystemInstruction(systemPromptStyle),
+        systemInstruction,
       },
     });
     const result = await fallbackModel.generateContent(parts);
@@ -408,58 +424,4 @@ export function createOnDeviceNanoModel() {
   return getGenerativeModel(ai, {
     mode: InferenceMode.ONLY_ON_DEVICE,
   });
-}
-
-export async function detectEntitiesOnDevice(rawText: string): Promise<{
-  entities: string[];
-  usedOnDeviceAI: boolean;
-  latencyMs: number;
-}> {
-  const started = performance.now();
-  try {
-    const model = createOnDeviceNanoModel();
-
-    const chunkSize = 1500;
-    const overlap = 150;
-    const chunks: string[] = [];
-    for (let pos = 0; pos < rawText.length && chunks.length < 3; pos += chunkSize - overlap) {
-      chunks.push(rawText.slice(pos, pos + chunkSize));
-      if (pos + chunkSize >= rawText.length) break;
-    }
-
-    const found = new Set<string>();
-    let anyRealAI = false;
-
-    for (const chunk of chunks) {
-      const res = await model.generateContent(
-        `Extract ONLY proper names of people, street addresses, and private company names from the text below. Return a plain comma-separated list with no explanation. If none, return NONE.\n\nText:\n${chunk}`
-      );
-      const cleaned = res.response.text().trim();
-      if (
-        !cleaned ||
-        cleaned.toUpperCase() === 'NONE' ||
-        /not available|echoing back/i.test(cleaned)
-      ) {
-        continue;
-      }
-      anyRealAI = true;
-      cleaned
-        .split(/[,\n]+/)
-        .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
-        .filter((s) => s.length >= 3 && s.length <= 45 && !s.includes(':') && s.split(/\s+/).length <= 4)
-        .forEach((e) => found.add(e));
-    }
-
-    return {
-      entities: Array.from(found),
-      usedOnDeviceAI: anyRealAI,
-      latencyMs: Math.round(performance.now() - started),
-    };
-  } catch {
-    return {
-      entities: [],
-      usedOnDeviceAI: false,
-      latencyMs: Math.round(performance.now() - started),
-    };
-  }
 }

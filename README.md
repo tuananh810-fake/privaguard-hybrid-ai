@@ -1,4 +1,4 @@
-# PrivaGuard AI (v6.0)
+# PrivaGuard AI (v6.1)
 
 > **Use cloud AI on confidential docs — secrets never leave your browser.**
 
@@ -7,9 +7,19 @@
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Firebase%20Hosting-0F7B6C?style=flat-square)](https://buildhybridai-tuananh.web.app)
 [![Built for](https://img.shields.io/badge/Hackathon-%23BuildHybridAI%202026-37352F?style=flat-square)](https://buildhybridai.devpost.com/)
 [![Firebase AI Logic](https://img.shields.io/badge/Firebase%20AI%20Logic-Hybrid%20Nano%20%2B%20Gemini%203.6%20Flash-DD2C00?style=flat-square)](https://firebase.google.com/docs/ai-logic)
-[![Tests](https://img.shields.io/badge/Unit%20Tests-13%2F13%20PASS-0F7B6C?style=flat-square)](#benchmarks--verification)
+[![Tests](https://img.shields.io/badge/Unit%20Tests-14%2F14%20PASS-0F7B6C?style=flat-square)](#benchmarks--verification)
 
 **Live App:** https://buildhybridai-tuananh.web.app
+
+---
+
+## Why Neither Cloud-Only Nor On-Device-Only Works
+
+| Architecture | Privacy on Confidential Docs | Reasoning Depth (SOC2/GDPR/OWASP) | Works Offline? |
+|---|---|---|---|
+| **Cloud-only** | Fails — raw API keys, CCCD/SSN, client names, and addresses must leave the browser first | Strong frontier structured audits | No |
+| **On-device-only** | Safe — raw text stays local | Limited context & weaker multi-framework JSON audits | Yes |
+| **PrivaGuard Hybrid** (`Nano` local semantic PII + `Cloud` reasoning on tokens) | **0 detected PII sent to cloud** — regex + on-device Gemini Nano + manual marks shield locally before anything leaves RAM | **Frontier Cloud Gemini 3.6 Flash** reasons over safe `[TOKEN_N]` placeholders and re-hydrates locally | **Yes** — PWA app shell + `ONLY_ON_DEVICE` Gemini Nano (`0 B` to cloud) |
 
 ---
 
@@ -17,12 +27,12 @@
 
 Regex alone catches structured patterns (API keys, JWTs, IBANs, CCCDs, emails, phones, IPv4s), but misses free-form names, Vietnamese diacritic names, private organizations, and street addresses. Pure cloud masking defeats the purpose because raw PII would have to leave the device first.
 
-PrivaGuard AI v6.0 gives **on-device Gemini Nano** an irreplaceable job in the Hybrid pipeline:
+PrivaGuard AI v6.1 gives **on-device Gemini Nano** an irreplaceable job in the Hybrid pipeline:
 
-1. **Regex layer (on-device, < 1 ms):** Deterministically masks structured secrets, cards/IBANs, SSNs/CCCDs, emails, phones, and valid IPv4s (`source: regex`).
-2. **Gemini Nano semantic discovery (`InferenceMode.ONLY_ON_DEVICE`):** Runs locally (5 s timeout + `AbortController`, verbatim anti-hallucination filter, span overlap deduplication) to find free-form `PERSON`, `ORG`, `ADDRESS`, and `LOCATION` entities that regex misses (`source: Nano`).
+1. **Regex layer (on-device, < 1 ms):** Deterministically masks structured secrets, cards/IBANs, SSNs/CCCDs, emails, phones (including VN landlines like `028-3822-1234`), and valid IPv4s (`source: regex`).
+2. **Gemini Nano semantic discovery (`InferenceMode.ONLY_ON_DEVICE`):** Runs locally — either on-demand via **Scan semantic PII (Nano)** in Diff/Payload *before* sending or automatically during analysis (5 s timeout + `AbortController`, verbatim anti-hallucination filter, span overlap deduplication, fingerprint reuse) — to find free-form `PERSON`, `ORG`, `ADDRESS`, and `LOCATION` entities that regex misses (`source: Nano`).
 3. **Human-in-the-loop (`Mark as sensitive`, `Ctrl/Cmd+Shift+M`):** Highlight any proprietary term or code name in the editor to add it immediately (`source: manual`).
-4. **Cloud reasoning (`gemini-3.6-flash` / `gemini-3.5-flash-lite` fallback) or Strict Offline Nano:** Receives **0 detected PII** — only bracketed placeholders (`[SECRET_1]`, `[PERSON_1]`, `[ORG_1]`, `[ADDRESS_1]`) — and returns structured JSON security audits or executive briefs.
+4. **Cloud reasoning (`gemini-3.6-flash` / `gemini-3.5-flash-lite` fallback) or Strict Offline Nano (`onDeviceParams` system prompt):** Receives **0 detected PII** — only bracketed placeholders (`[SECRET_1]`, `[PERSON_1]`, `[ORG_1]`, `[ADDRESS_1]`) — and returns structured JSON security audits or executive briefs while strictly preserving tokens on both Cloud and Nano.
 5. **Local RAM re-hydration:** Real values stay strictly in browser RAM; click any token chip to peek locally, or toggle full re-hydration. Hallucinated `[TYPE_N]` tokens not found in the local vault are flagged as `unknown token` chips.
 
 > **Honest Privacy Claim:** **0 detected PII sent to cloud.** Detection = regex + on-device Nano + your manual marks; review the Diff before sending.
@@ -45,14 +55,17 @@ flowchart LR
 
 ---
 
-## What's New in v6.0
+## What's New in v6.1
 
+- **Pre-Send Nano Scan in Diff & Payload:** When `Gemini Nano ready`, click **Scan semantic PII (Nano)** inside Diff or Payload to preview `source: Nano` chips *before* sending anything to the cloud; the result is fingerprinted and reused automatically when you click **Analyze safely**.
+- **On-Device System Prompt (`onDeviceParams`):** Passes `createOptions.initialPrompts` (system role) to Firebase AI Logic's on-device Nano session so offline analyses preserve `[SECRET_1]`, `[PERSON_1]`, etc. verbatim.
+- **Exact UTF-8 `rawPiiBytesSent` Telemetry:** Measures true UTF-8 byte lengths over any detected leaks via `TextEncoder` (`0 B` when clean or on-device).
 - **Gemini Nano Semantic PII Discovery (`src/services/nanoEntityDiscovery.ts`):** Uses `InferenceMode.ONLY_ON_DEVICE` to extract `PERSON`, `ORG`, `ADDRESS`, and `LOCATION` entities (EN + VI diacritics) before cloud inference, with a 5 s timeout, verbatim anti-hallucination check, and regex span deduplication.
 - **Transparent Engine & Availability UX:** Detects Nano availability at startup; shows a calm `"Gemini Nano ready"` badge when available or a dismissible Notion banner with official Chrome setup instructions when unavailable. Every result explicitly displays `Ran on: Device (Nano)` or `Ran on: Cloud (<model>)`.
 - **Mark as Sensitive (`Ctrl/Cmd+Shift+M`) & Unknown Token Guard:** Highlight text in the editor to add removable manual terms (`source: manual`). Hallucinated `[TYPE_N]` tokens absent from the local vault render as muted `unknown token` chips instead of silently breaking re-hydration.
 - **Per-Run Hybrid Metrics Strip:** Every analysis displays `Engine · Latency (ms) · TTFT (ms) · Masked entities (regex/Nano/manual) · Bytes sent to cloud (0 B on Nano) · Raw PII bytes sent: 0 B`.
 - **Automated Accuracy Eval & Prompt-Injection Defense:** 52-sample EN+VI benchmark (`scripts/eval-pii.ts`) with real Precision/Recall/F1 metrics + automated prompt-injection test proving the local vault is never serialized into cloud prompts.
-- **True Offline PWA App Shell (`public/sw.js` + `public/manifest.webmanifest`):** Hand-written Service Worker caches the app shell, hashed JS/CSS chunks, and local samples while strictly excluding all Firebase/Google/reCAPTCHA API endpoints.
+- **True Offline PWA App Shell (`public/sw.js` + `public/manifest.webmanifest`):** Hand-written Service Worker (`privaguard-shell-v6.1.0`) caches the app shell, hashed JS/CSS chunks, and local samples while strictly excluding all Firebase/Google/reCAPTCHA API endpoints.
 - **Local Document & OCR Suite (v5.0/v5.1):** Drag-and-drop PDF (max 25 pages via `pdfjs-dist`) and DOCX (`mammoth`), 1-click `Try sample PDF` / `Try sample image`, `eng+vie` auto-OCR image masking (`tesseract.js`), and SHA-256 sanitized payload proof in `.md` exports.
 
 ---
@@ -99,10 +112,10 @@ Measured by `node scripts/eval-pii.ts` across **52 synthetic EN + VI samples** (
 
 | Verification Suite | Real Measured Result |
 |---|---|
-| **Unit Tests** (`node --test tests/privaguard.test.ts`) | **13/13 PASS** (JWT, PEM, DB URI, CCCD, VN/US phones, `999.999.999.999`, `v1.2.3.4`, `1.2.3.4-rc1`, case-insensitive terms, Follow-up vault continuation, `parseStructuredAudit`, `ocrPiiMatcher` EN + VI diacritics, `documentParser`, `nanoEntityDiscovery` anti-hallucination, unknown token audit, prompt-injection defense) |
+| **Unit Tests** (`node --test tests/privaguard.test.ts`) | **14/14 PASS** (JWT, PEM, DB URI, CCCD, VN/US phones & VN landline `028-3822-1234`, `999.999.999.999`, `v1.2.3.4`, `1.2.3.4-rc1`, case-insensitive terms, Follow-up vault continuation, `parseStructuredAudit`, `ocrPiiMatcher` EN + VI diacritics, `documentParser`, `nanoEntityDiscovery` anti-hallucination, unknown token audit, prompt-injection defense, exact UTF-8 `rawPiiBytesSent`) |
 | **Regex Accuracy Eval** (`node scripts/eval-pii.ts`) | **Precision 100.0% · Recall 100.0% · F1 100.0%** across 52 EN+VI samples (**11/11** decoys clean) |
-| **Concurrency Stress Test** (`node scripts/stress-test.ts`) | **1,000 docs in 255 ms** (`0.255 ms/doc`) · **5,000 secrets** · **0 detected leaks** · **0 mismatches** |
-| **Bundle Discipline** (`npm run build`) | `index.js`: **171.52 kB** (`50.09 kB` gzip) · `nanoEntityDiscovery`: **3.89 kB** (`1.87 kB` gzip, lazy) · `pdfjs-dist`, `mammoth`, `tesseract.js`, `firestore` all strictly lazy-loaded |
+| **Concurrency Stress Test** (`node scripts/stress-test.ts`) | **1,000 docs in 250 ms** (`0.250 ms/doc`) · **5,000 secrets** · **0 detected leaks** · **0 mismatches** |
+| **Bundle Discipline** (`npm run build`) | `index.js`: **174.70 kB** (`50.72 kB` gzip) · `nanoEntityDiscovery`: **3.89 kB** (`1.87 kB` gzip, lazy) · `pdfjs-dist`, `mammoth`, `tesseract.js`, `firestore` all strictly lazy-loaded |
 
 ---
 

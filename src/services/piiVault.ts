@@ -276,14 +276,15 @@ export function redactLocally(
 }
 
 /**
- * Boundary-aware Zero-Leak check: avoids false positives when an IP like 1.2.3.4 is in the vault
+ * Boundary-aware Zero-Leak inspector: returns exact original strings still present
+ * in payload, while avoiding false positives when an IP like 1.2.3.4 is in the vault
  * and a version string like v1.2.3.4 or 1.2.3.4-rc1 legitimately remains in the text.
  */
-export function verifyZeroLeak(
+export function findLeakedOriginals(
   payload: string,
   vault: Array<Pick<VaultEntry, 'token' | 'category' | 'original'>>
-): number {
-  let leaks = 0;
+): string[] {
+  const leaks: string[] = [];
   for (const entry of vault) {
     if (entry.original.length < 4) continue;
     const escaped = escapeRegExp(entry.original);
@@ -300,10 +301,33 @@ export function verifyZeroLeak(
     }
 
     if (new RegExp(pattern).test(payload)) {
-      leaks += 1;
+      leaks.push(entry.original);
     }
   }
   return leaks;
+}
+
+/**
+ * Returns the number of leaked vault originals found in payload.
+ */
+export function verifyZeroLeak(
+  payload: string,
+  vault: Array<Pick<VaultEntry, 'token' | 'category' | 'original'>>
+): number {
+  return findLeakedOriginals(payload, vault).length;
+}
+
+/**
+ * Computes exact UTF-8 byte length of any leaked PII strings (0 when clean).
+ */
+export function computeRawPiiBytes(leaks: string[]): number {
+  if (leaks.length === 0) return 0;
+  const encoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+  let total = 0;
+  for (const item of leaks) {
+    total += encoder ? encoder.encode(item).length : item.length;
+  }
+  return total;
 }
 
 export const GENERIC_TOKEN_REGEX = /\[[A-Z][A-Z0-9]*_\d+\]/g;

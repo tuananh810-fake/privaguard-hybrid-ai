@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Code2,
   Columns2,
+  Cpu,
   FileText,
   Image as ImageIcon,
   Paperclip,
@@ -14,7 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { SAMPLE_DOCUMENTS } from '../data/samples';
-import { AnalysisTask, AttachedImage } from '../services/hybridAI';
+import { AnalysisTask, AttachedImage, NanoAvailability } from '../services/hybridAI';
 import { RedactionResult, VaultEntry } from '../services/piiVault';
 import { HighlightedRedactedText } from './RichOutput';
 
@@ -46,6 +47,10 @@ interface DocumentInputPanelProps {
   manualTerms: string[];
   onAddManualTerm: (term: string) => void;
   onRemoveManualTerm: (term: string) => void;
+  nanoStatus: NanoAvailability;
+  scanningNano: boolean;
+  nanoScanNotice: string | null;
+  onScanNano: () => void;
   attachedImage: AttachedImage | null;
   imageMaskCount: number;
   onOpenImageRedactor: () => void;
@@ -118,6 +123,10 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     manualTerms,
     onAddManualTerm,
     onRemoveManualTerm,
+    nanoStatus,
+    scanningNano,
+    nanoScanNotice,
+    onScanNano,
     attachedImage,
     imageMaskCount,
     onOpenImageRedactor,
@@ -414,6 +423,33 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
 
         {/* Clean Notion Editorial Surface */}
         <div className="flex flex-1 flex-col">
+          {(inputTab === 'diff' || inputTab === 'audit') && nanoStatus === 'available' && (
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2.5 py-1.5 text-[12px]">
+              <button
+                type="button"
+                onClick={onScanNano}
+                disabled={scanningNano || running || !rawText.trim()}
+                aria-label="Scan semantic PII locally with Gemini Nano before sending"
+                aria-busy={scanningNano}
+                className="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {scanningNano ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-[var(--n-accent)]" />
+                ) : (
+                  <Cpu className="h-3.5 w-3.5 text-[var(--n-accent)]" />
+                )}
+                {scanningNano ? 'Scanning with Nano…' : 'Scan semantic PII (Nano)'}
+              </button>
+              <span
+                role="status"
+                aria-live="polite"
+                className="text-[11.5px] text-[var(--n-muted)]"
+              >
+                {nanoScanNotice ?? 'Preview local Nano entity masks before cloud analysis'}
+              </span>
+            </div>
+          )}
+
           {inputTab === 'original' ? (
             <div className="flex flex-1 flex-col">
               {selectedText && (

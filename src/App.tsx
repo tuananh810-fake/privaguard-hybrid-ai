@@ -14,7 +14,9 @@ import { SAMPLE_DOCUMENTS } from './data/samples';
 import {
   buildVaultLookup,
   CategoryFilter,
+  computeRawPiiBytes,
   DEFAULT_CATEGORY_FILTER,
+  findLeakedOriginals,
   PiiCategory,
   redactLocally,
   rehydrateLocally,
@@ -89,6 +91,8 @@ export default function App() {
   });
 
   const [aiDiscoveredEntities, setAiDiscoveredEntities] = useState<NanoDiscoveredEntity[]>([]);
+  const [scanningNano, setScanningNano] = useState(false);
+  const [nanoScanNotice, setNanoScanNotice] = useState<string | null>(null);
   const [extraFollowUpVault, setExtraFollowUpVault] = useState<VaultEntry[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [result, setResult] = useState<HybridResponse | null>(null);
@@ -113,6 +117,9 @@ export default function App() {
   const [firestoreError, setFirestoreError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const nanoScanAbortRef = useRef<AbortController | null>(null);
+  const nanoScannedTextRef = useRef<string | null>(null);
+  const nanoEntitiesRef = useRef<NanoDiscoveredEntity[]>([]);
   const rafRef = useRef<number | null>(null);
   const outputContainerRef = useRef<HTMLDivElement>(null);
   const historyModuleRef = useRef<typeof import('./services/historyStore') | null>(null);
@@ -206,6 +213,7 @@ export default function App() {
     return () => {
       cancelled = true;
       abortRef.current?.abort();
+      nanoScanAbortRef.current?.abort();
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       if (idleId !== null && typeof idleWin.cancelIdleCallback === 'function') {
         idleWin.cancelIdleCallback(idleId);
@@ -316,9 +324,21 @@ export default function App() {
     setFollowUpRunning(false);
   }, []);
 
+  const handleRawTextChange = useCallback((val: string) => {
+    nanoScanAbortRef.current?.abort();
+    nanoScannedTextRef.current = null;
+    setNanoScanNotice(null);
+    setRawText(val);
+  }, []);
+
   const handleSelectSample = useCallback((content: string) => {
     abortRef.current?.abort();
+    nanoScanAbortRef.current?.abort();
+    nanoScannedTextRef.current = null;
+    nanoEntitiesRef.current = [];
     setRunning(false);
+    setScanningNano(false);
+    setNanoScanNotice(null);
     setRawText(content);
     setFileMeta(null);
     setAiDiscoveredEntities([]);
@@ -333,12 +353,59 @@ export default function App() {
   }, []);
 
   const handleToggleCategory = useCallback((key: PiiCategory) => {
+    nanoScanAbortRef.current?.abort();
+    nanoScannedTextRef.current = null;
+    setNanoScanNotice(null);
     setCategories((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
+  const handleScanNano = useCallback(async () => {
+    if (nanoStatus !== 'available' || !rawText.trim() || scanningNano) return;
+    nanoScanAbortRef.current?.abort();
+    const controller = new AbortController();
+    nanoScanAbortRef.current = controller;
+
+    setScanningNano(true);
+    setNanoScanNotice(null);
+
+    try {
+      const regexOnly = redactLocally(rawText, [], categories);
+      const { discoverSemanticEntitiesWithNano } = await import('./services/nanoEntityDiscovery');
+      const localScan = await discoverSemanticEntitiesWithNano(rawText, {
+        alreadyMaskedByRegex: regexOnly.vault.map((v) => v.original),
+        timeoutMs: 5000,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+
+      const discovered = localScan.entities;
+      nanoEntitiesRef.current = discovered;
+      nanoScannedTextRef.current = rawText;
+      setAiDiscoveredEntities(discovered);
+      setNanoScanNotice(
+        discovered.length > 0
+          ? `Nano found ${discovered.length} semantic ${discovered.length === 1 ? 'entity' : 'entities'}`
+          : 'Nano scan complete · 0 new entities'
+      );
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      setNanoScanNotice('Nano scan complete · 0 new entities');
+    } finally {
+      if (nanoScanAbortRef.current === controller) {
+        nanoScanAbortRef.current = null;
+        setScanningNano(false);
+      }
+    }
+  }, [nanoStatus, rawText, categories, scanningNano]);
+
   const processDocumentFile = useCallback(async (file: File) => {
     abortRef.current?.abort();
+    nanoScanAbortRef.current?.abort();
+    nanoScannedTextRef.current = null;
+    nanoEntitiesRef.current = [];
     setRunning(false);
+    setScanningNano(false);
+    setNanoScanNotice(null);
     setExtractingFile(true);
     setErrorMsg(null);
     try {
@@ -435,18 +502,25 @@ export default function App() {
     try {
       const effectiveMode: ModeKey = !effectiveOnline ? 'ONLY_ON_DEVICE' : mode;
 
+      nanoScanAbortRef.current?.abort();
       let discovered: NanoDiscoveredEntity[] = [];
       if (nanoStatus === 'available') {
-        const regexOnly = redactLocally(rawText, [], categories);
-        const { discoverSemanticEntitiesWithNano } = await import('./services/nanoEntityDiscovery');
-        const localScan = await discoverSemanticEntitiesWithNano(rawText, {
-          alreadyMaskedByRegex: regexOnly.vault.map((v) => v.original),
-          timeoutMs: 5000,
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) return;
-        discovered = localScan.entities;
-        setAiDiscoveredEntities(discovered);
+        if (nanoScannedTextRef.current === rawText) {
+          discovered = nanoEntitiesRef.current;
+        } else {
+          const regexOnly = redactLocally(rawText, [], categories);
+          const { discoverSemanticEntitiesWithNano } = await import('./services/nanoEntityDiscovery');
+          const localScan = await discoverSemanticEntitiesWithNano(rawText, {
+            alreadyMaskedByRegex: regexOnly.vault.map((v) => v.original),
+            timeoutMs: 5000,
+            signal: controller.signal,
+          });
+          if (controller.signal.aborted) return;
+          discovered = localScan.entities;
+          nanoEntitiesRef.current = discovered;
+          nanoScannedTextRef.current = rawText;
+          setAiDiscoveredEntities(discovered);
+        }
       }
 
       const manualTerms: TaggedSensitiveTerm[] = customTerms
@@ -484,12 +558,18 @@ export default function App() {
             : prompt.length;
         const imgBytes = attachedImage ? Math.round((attachedImage.base64Data.length * 3) / 4) : 0;
         const bytesSentToCloud = aiRes.inferenceSource === 'ON_DEVICE' ? 0 : promptBytes + imgBytes;
+        const rawPiiBytesSent =
+          aiRes.inferenceSource === 'ON_DEVICE'
+            ? 0
+            : computeRawPiiBytes(
+                findLeakedOriginals(finalRedaction.redactedText, finalRedaction.vault)
+              );
 
         setResult(aiRes);
         setRunMetrics({
           sourceCounts: finalRedaction.sourceCounts,
           bytesSentToCloud,
-          rawPiiBytesSent: finalRedaction.leaksFound,
+          rawPiiBytesSent,
           shieldTimeMs: finalRedaction.shieldTimeMs,
         });
         setStreamingText(aiRes.text);
@@ -824,7 +904,7 @@ export default function App() {
         <div className="grid grid-cols-1 lg:grid-cols-2">
           <DocumentInputPanel
             rawText={rawText}
-            onRawTextChange={setRawText}
+            onRawTextChange={handleRawTextChange}
             onSelectSample={handleSelectSample}
             onTextFileUpload={handleTextFileUpload}
             onImageUpload={handleImageUpload}
@@ -841,6 +921,10 @@ export default function App() {
             manualTerms={manualTermsList}
             onAddManualTerm={handleAddManualTerm}
             onRemoveManualTerm={handleRemoveManualTerm}
+            nanoStatus={nanoStatus}
+            scanningNano={scanningNano}
+            nanoScanNotice={nanoScanNotice}
+            onScanNano={handleScanNano}
             attachedImage={attachedImage}
             imageMaskCount={imageMaskCount}
             onOpenImageRedactor={() => setShowImageRedactor(true)}

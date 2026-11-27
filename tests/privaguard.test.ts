@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  computeRawPiiBytes,
   DEFAULT_CATEGORY_FILTER,
+  findLeakedOriginals,
   findUnknownTokens,
   redactLocally,
   rehydrateLocally,
@@ -289,4 +291,29 @@ test('v6.0 prompt injection defense: cloud payload never contains raw PII or ser
   assert.ok(!outgoingCloudPayload.includes(secretKey));
   assert.ok(!outgoingCloudPayload.includes(secretPerson));
   assert.ok(!outgoingCloudPayload.includes(JSON.stringify(redaction.vault)));
+});
+
+test('v6.1 rawPiiBytesSent: computes 0 B when clean, exact UTF-8 bytes on Vietnamese diacritic leaks, and redacts VN landline 028-3822-1234', () => {
+  const vnName = 'Nguyễn Minh Khôi';
+  const vnLandline = '028-3822-1234';
+  const raw = `Liên hệ ${vnName} qua số bàn văn phòng ${vnLandline} để xác nhận.`;
+
+  const res = redactLocally(raw, [{ text: vnName, source: 'nano', category: 'PERSON' }]);
+  assert.equal(res.leaksFound, 0);
+  assert.ok(res.vault.some((v) => v.category === 'PHONE' && v.original === vnLandline));
+  assert.ok(!res.redactedText.includes(vnLandline));
+  assert.equal(rehydrateLocally(res.redactedText, res.vault), raw);
+
+  // Clean payload -> 0 leaked bytes
+  const cleanLeaks = findLeakedOriginals(res.redactedText, res.vault);
+  assert.deepEqual(cleanLeaks, []);
+  assert.equal(computeRawPiiBytes(cleanLeaks), 0);
+
+  // Simulated leak of Vietnamese diacritic name -> exact UTF-8 byte count (not JS UTF-16 char length)
+  const expectedUtf8Bytes = new TextEncoder().encode(vnName).length;
+  assert.ok(expectedUtf8Bytes > vnName.length, 'Vietnamese diacritics must exceed UTF-16 code unit count');
+  const simulatedLeakedPayload = `Leaked report still mentions ${vnName} in body.`;
+  const detectedLeaks = findLeakedOriginals(simulatedLeakedPayload, res.vault);
+  assert.deepEqual(detectedLeaks, [vnName]);
+  assert.equal(computeRawPiiBytes(detectedLeaks), expectedUtf8Bytes);
 });
