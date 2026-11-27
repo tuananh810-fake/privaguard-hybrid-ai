@@ -37,6 +37,7 @@ const auth = getAuth(app);
 
 let cachedUid: string | null = null;
 let authPromise: Promise<string | null> | null = null;
+let anonymousAuthDisabled = false;
 
 export function getWorkspaceId(): string {
   if (typeof localStorage === 'undefined') return 'default-session';
@@ -51,9 +52,33 @@ export function getWorkspaceId(): string {
   return id;
 }
 
+function formatFirestoreError(err: unknown): Error {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code?: unknown }).code || '').toLowerCase()
+      : '';
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+
+  if (
+    anonymousAuthDisabled ||
+    code.includes('permission-denied') ||
+    code.includes('auth/operation-not-allowed') ||
+    code.includes('auth/admin-restricted-operation') ||
+    msg.includes('permission_denied') ||
+    msg.includes('missing or insufficient permissions') ||
+    msg.includes('operation-not-allowed')
+  ) {
+    return new Error(
+      'Saved history is paused: enable Anonymous Sign-in in Firebase Console (Authentication → Sign-in method) and deploy firestore.rules. Core AI analysis continues working normally.'
+    );
+  }
+
+  return err instanceof Error ? err : new Error(String(err));
+}
+
 /**
  * Ensures the browser has a Firebase Anonymous Auth UID for owner-scoped Firestore rules.
- * Gracefully falls back to null if Anonymous Auth is not yet enabled in Firebase Console.
+ * Tracks auth/operation-not-allowed cleanly so UI displays a clear setup hint without disrupting AI analysis.
  */
 export async function ensureAnonymousUid(): Promise<string | null> {
   if (cachedUid) return cachedUid;
@@ -76,8 +101,21 @@ export async function ensureAnonymousUid(): Promise<string | null> {
         }
         const cred = await signInAnonymously(auth);
         cachedUid = cred.user.uid;
+        anonymousAuthDisabled = false;
         return cachedUid;
-      } catch {
+      } catch (err) {
+        const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+        const code =
+          typeof err === 'object' && err !== null && 'code' in err
+            ? String((err as { code?: unknown }).code || '').toLowerCase()
+            : '';
+        if (
+          code.includes('operation-not-allowed') ||
+          code.includes('admin-restricted-operation') ||
+          msg.includes('operation-not-allowed')
+        ) {
+          anonymousAuthDisabled = true;
+        }
         return null;
       }
     })();
@@ -88,19 +126,27 @@ export async function ensureAnonymousUid(): Promise<string | null> {
 export async function saveAnonymizedAnalysis(
   entry: Omit<SavedAnalysis, 'id' | 'ownerUid' | 'workspaceId' | 'createdAt'>
 ): Promise<string> {
-  const uid = await ensureAnonymousUid();
-  const workspaceId = getWorkspaceId();
-  const ref = await addDoc(collection(db, COLLECTION), {
-    ...entry,
-    ownerUid: uid || workspaceId,
-    workspaceId,
-    createdAt: serverTimestamp(),
-  });
-  return ref.id;
+  try {
+    const uid = await ensureAnonymousUid();
+    const workspaceId = getWorkspaceId();
+    const ref = await addDoc(collection(db, COLLECTION), {
+      ...entry,
+      ownerUid: uid || workspaceId,
+      workspaceId,
+      createdAt: serverTimestamp(),
+    });
+    return ref.id;
+  } catch (err) {
+    throw formatFirestoreError(err);
+  }
 }
 
 export async function deleteSavedAnalysis(id: string): Promise<void> {
-  await deleteDoc(doc(db, COLLECTION, id));
+  try {
+    await deleteDoc(doc(db, COLLECTION, id));
+  } catch (err) {
+    throw formatFirestoreError(err);
+  }
 }
 
 /**
@@ -152,7 +198,7 @@ export function subscribeRecentAnalyses(
         onData(items);
       },
       (err) => {
-        if (onError) onError(err);
+        if (onError) onError(formatFirestoreError(err));
       }
     );
   });

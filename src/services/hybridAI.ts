@@ -1,29 +1,29 @@
 import { getGenerativeModel, InferenceMode, Part, Schema } from 'firebase/ai';
 import { ai } from '../firebase';
+import {
+  AnalysisTask,
+  buildTaskPrompt,
+  extractRiskBanner,
+  ParsedRiskBanner,
+  parseStructuredAudit,
+  StructuredAuditReport,
+  StructuredFinding,
+  StructuredRemediation,
+  structuredAuditToMarkdown,
+} from './hybridHelpers';
+
+export type {
+  AnalysisTask,
+  ParsedRiskBanner,
+  StructuredAuditReport,
+  StructuredFinding,
+  StructuredRemediation,
+};
+export { buildTaskPrompt, extractRiskBanner, parseStructuredAudit, structuredAuditToMarkdown };
 
 export type ModeKey = 'PREFER_ON_DEVICE' | 'ONLY_ON_DEVICE' | 'PREFER_IN_CLOUD' | 'ONLY_IN_CLOUD';
 
 export type NanoAvailability = 'available' | 'downloadable' | 'downloading' | 'unavailable';
-
-export interface StructuredFinding {
-  title: string;
-  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  detail: string;
-}
-
-export interface StructuredRemediation {
-  step: string;
-  priority: 'IMMEDIATE' | 'SHORT_TERM' | 'LONG_TERM';
-}
-
-export interface StructuredAuditReport {
-  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  riskScore: number;
-  summary: string;
-  complianceFrameworks: string[];
-  findings: StructuredFinding[];
-  remediations: StructuredRemediation[];
-}
 
 export interface HybridResponse {
   text: string;
@@ -60,7 +60,9 @@ const SECURITY_AUDIT_SCHEMA = Schema.object({
   properties: {
     riskLevel: Schema.enumString({ enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] }),
     riskScore: Schema.integer({ description: 'Overall risk score from 0 (safe) to 100 (critical)' }),
-    summary: Schema.string({ description: 'Concise 1-sentence executive risk summary preserving all [TOKEN_N] placeholders' }),
+    summary: Schema.string({
+      description: 'Concise 1-sentence executive risk summary preserving all [TOKEN_N] placeholders',
+    }),
     complianceFrameworks: Schema.array({
       items: Schema.string(),
       description: 'Relevant frameworks impacted, e.g. SOC2, GDPR, HIPAA, PCI-DSS, OWASP',
@@ -87,79 +89,6 @@ const SECURITY_AUDIT_SCHEMA = Schema.object({
   },
   required: ['riskLevel', 'riskScore', 'summary', 'complianceFrameworks', 'findings', 'remediations'],
 });
-
-export function parseStructuredAudit(rawJson: string): StructuredAuditReport | null {
-  try {
-    const cleaned = rawJson
-      .trim()
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/, '');
-    const parsed = JSON.parse(cleaned) as Partial<StructuredAuditReport>;
-    if (
-      !parsed ||
-      typeof parsed.summary !== 'string' ||
-      !Array.isArray(parsed.findings) ||
-      !Array.isArray(parsed.remediations)
-    ) {
-      return null;
-    }
-    const level = String(parsed.riskLevel || 'MEDIUM').toUpperCase();
-    const riskLevel = (
-      ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(level) ? level : 'MEDIUM'
-    ) as StructuredAuditReport['riskLevel'];
-    const score = Math.max(0, Math.min(100, Math.round(Number(parsed.riskScore ?? 50))));
-    return {
-      riskLevel,
-      riskScore: score,
-      summary: parsed.summary,
-      complianceFrameworks: Array.isArray(parsed.complianceFrameworks)
-        ? parsed.complianceFrameworks.map(String).slice(0, 6)
-        : [],
-      findings: parsed.findings.slice(0, 8).map((f) => ({
-        title: String(f.title || 'Finding'),
-        severity: (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(String(f.severity).toUpperCase())
-          ? String(f.severity).toUpperCase()
-          : 'MEDIUM') as StructuredFinding['severity'],
-        detail: String(f.detail || ''),
-      })),
-      remediations: parsed.remediations.slice(0, 8).map((r) => ({
-        step: String(r.step || ''),
-        priority: (['IMMEDIATE', 'SHORT_TERM', 'LONG_TERM'].includes(
-          String(r.priority).toUpperCase()
-        )
-          ? String(r.priority).toUpperCase()
-          : 'IMMEDIATE') as StructuredRemediation['priority'],
-      })),
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function structuredAuditToMarkdown(report: StructuredAuditReport): string {
-  const frameworks =
-    report.complianceFrameworks.length > 0
-      ? `\n**Compliance Frameworks:** ${report.complianceFrameworks.join(', ')}\n`
-      : '';
-  const findingsMd = report.findings
-    .map((f) => `- **[${f.severity}] ${f.title}:** ${f.detail}`)
-    .join('\n');
-  const remMd = report.remediations
-    .map((r, i) => `${i + 1}. **[${r.priority}]** ${r.step}`)
-    .join('\n');
-
-  return [
-    `### Risk Level`,
-    `**${report.riskLevel}** (Score: ${report.riskScore}/100) — ${report.summary}`,
-    frameworks,
-    `### Top Security & Compliance Findings`,
-    findingsMd,
-    `\n### Immediate Remediation Checklist`,
-    remMd,
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
 
 function makeCacheKey(
   prompt: string,
@@ -281,7 +210,6 @@ async function runSingleStream(
       if (chunkText) {
         if (ttftMs === 0) ttftMs = Math.round(performance.now() - started);
         accumulated += chunkText;
-        // For structured JSON mode, wait until complete JSON parses cleanly before rendering Markdown
         if (!useStructuredAudit) {
           onChunk?.(accumulated);
         }
@@ -320,7 +248,6 @@ async function runSingleStream(
     if (isRateLimitOrTransientError(streamErr)) {
       throw streamErr;
     }
-    // Fallback to plain Markdown non-streaming generateContent (e.g. Gemini Nano on-device without schema support)
     const fallbackModel = getGenerativeModel(ai, {
       model: cloudModel,
       mode: toInferenceMode(modeKey),
@@ -352,12 +279,6 @@ async function runSingleStream(
   }
 }
 
-/**
- * Streaming Hybrid Inference via Firebase AI Logic SDK.
- * Supports Structured JSON Schema (`responseSchema`) for Security Audits with automatic
- * Markdown fallback for Gemini Nano on-device, LRU caching, AbortSignal cancellation,
- * and automatic 429/503 fallback to gemini-2.5-flash-lite.
- */
 export async function generateHybridStream(
   prompt: string,
   modeKey: ModeKey,
@@ -431,7 +352,7 @@ export async function generateHybridStream(
     }
     if (isRateLimitOrTransientError(err)) {
       throw new Error(
-        'Cloud AI is temporarily busy (free-tier rate limit reached by concurrent users). Please wait a few seconds or switch to Only On-Device mode.'
+        'Cloud AI is temporarily busy (free-tier rate limit reached by concurrent users). Please wait a few seconds or switch to Strict Offline mode.'
       );
     }
     throw err;
@@ -530,42 +451,5 @@ export async function detectEntitiesOnDevice(rawText: string): Promise<{
       usedOnDeviceAI: false,
       latencyMs: Math.round(performance.now() - started),
     };
-  }
-}
-
-export type AnalysisTask = 'executive' | 'risk_audit' | 'action_plan' | 'quick_offline';
-
-export interface ParsedRiskBanner {
-  level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  summary: string;
-}
-
-export function extractRiskBanner(markdown: string): ParsedRiskBanner | null {
-  const match = markdown.match(
-    /(?:###\s*Risk Level[\s\S]{0,40}?|\*\*Risk Level\*\*[:\s]*)\b(Critical|High|Medium|Low)\b([^\n]*)/i
-  );
-  if (!match) return null;
-  const level = match[1].toUpperCase() as ParsedRiskBanner['level'];
-  const summary = match[2].replace(/^[\s:—–-]+/, '').trim();
-  return { level, summary };
-}
-
-export function buildTaskPrompt(redactedText: string, task: AnalysisTask, hasImage = false): string {
-  const keepTokensRule =
-    'IMPORTANT: Preserve all bracketed placeholders exactly as written (e.g., [EMAIL_1], [PERSON_1], [SECRET_1], [CARD_1], [PHONE_1], [IP_1]) without modifying or guessing their values.';
-  const imageHint = hasImage
-    ? '\nAlso analyze the attached image and incorporate key findings (do not repeat any raw PII).'
-    : '';
-
-  switch (task) {
-    case 'quick_offline':
-      return `${keepTokensRule}${imageHint}\nGive a crisp 3-bullet summary and 1-sentence tone assessment of the following anonymized note:\n\n${redactedText}`;
-    case 'risk_audit':
-      return `${keepTokensRule}${imageHint}\nYou are a Senior Security & Legal Auditor. Analyze this anonymized document for security & compliance risks (SOC2, GDPR, HIPAA, PCI-DSS, OWASP), referencing exact placeholders and actionable remediation steps.\n\nDocument:\n${redactedText}`;
-    case 'action_plan':
-      return `${keepTokensRule}${imageHint}\nExtract a prioritized Action Plan in Markdown from this anonymized document:\n### Urgent Next Steps (24h)\n### Owners & Deliverables\n### Follow-up Checklist\n\nDocument:\n${redactedText}`;
-    case 'executive':
-    default:
-      return `${keepTokensRule}${imageHint}\nProvide a concise Executive Brief in Markdown of this anonymized document:\n### TL;DR\n### Key Facts & Decisions\n### Recommended Next Action\n\nDocument:\n${redactedText}`;
   }
 }
