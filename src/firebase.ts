@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { getAI, GoogleAIBackend } from 'firebase/ai';
-import { getFirestore } from 'firebase/firestore';
 import { getRemoteConfig, fetchAndActivate, getString } from 'firebase/remote-config';
 
 export const firebaseConfig = {
@@ -38,7 +37,6 @@ export const appCheck = initializeAppCheck(app, {
 });
 
 export const ai = getAI(app, { backend: new GoogleAIBackend() });
-export const db = getFirestore(app);
 export const remoteConfig = getRemoteConfig(app);
 
 remoteConfig.settings.minimumFetchIntervalMillis = 60_000;

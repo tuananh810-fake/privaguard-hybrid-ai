@@ -1,9 +1,29 @@
-import { getGenerativeModel, InferenceMode, Part } from 'firebase/ai';
+import { getGenerativeModel, InferenceMode, Part, Schema } from 'firebase/ai';
 import { ai } from '../firebase';
 
 export type ModeKey = 'PREFER_ON_DEVICE' | 'ONLY_ON_DEVICE' | 'PREFER_IN_CLOUD' | 'ONLY_IN_CLOUD';
 
 export type NanoAvailability = 'available' | 'downloadable' | 'downloading' | 'unavailable';
+
+export interface StructuredFinding {
+  title: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  detail: string;
+}
+
+export interface StructuredRemediation {
+  step: string;
+  priority: 'IMMEDIATE' | 'SHORT_TERM' | 'LONG_TERM';
+}
+
+export interface StructuredAuditReport {
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  riskScore: number;
+  summary: string;
+  complianceFrameworks: string[];
+  findings: StructuredFinding[];
+  remediations: StructuredRemediation[];
+}
 
 export interface HybridResponse {
   text: string;
@@ -14,6 +34,7 @@ export interface HybridResponse {
   wasMockEcho?: boolean;
   cached?: boolean;
   fallbackUsed?: boolean;
+  structuredAudit?: StructuredAuditReport | null;
 }
 
 export interface AttachedImage {
@@ -23,18 +44,148 @@ export interface AttachedImage {
   previewUrl: string;
 }
 
+export interface FollowUpMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  inferenceSource?: 'ON_DEVICE' | 'IN_CLOUD' | 'UNKNOWN';
+  latencyMs?: number;
+}
+
 const FALLBACK_CLOUD_MODEL = 'gemini-2.5-flash-lite';
-const MAX_CACHE_ENTRIES = 20;
+const MAX_CACHE_ENTRIES = 24;
 const responseCache = new Map<string, HybridResponse>();
+
+const SECURITY_AUDIT_SCHEMA = Schema.object({
+  properties: {
+    riskLevel: Schema.enumString({ enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] }),
+    riskScore: Schema.integer({ description: 'Overall risk score from 0 (safe) to 100 (critical)' }),
+    summary: Schema.string({ description: 'Concise 1-sentence executive risk summary preserving all [TOKEN_N] placeholders' }),
+    complianceFrameworks: Schema.array({
+      items: Schema.string(),
+      description: 'Relevant frameworks impacted, e.g. SOC2, GDPR, HIPAA, PCI-DSS, OWASP',
+    }),
+    findings: Schema.array({
+      items: Schema.object({
+        properties: {
+          title: Schema.string(),
+          severity: Schema.enumString({ enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] }),
+          detail: Schema.string(),
+        },
+        required: ['title', 'severity', 'detail'],
+      }),
+    }),
+    remediations: Schema.array({
+      items: Schema.object({
+        properties: {
+          step: Schema.string(),
+          priority: Schema.enumString({ enum: ['IMMEDIATE', 'SHORT_TERM', 'LONG_TERM'] }),
+        },
+        required: ['step', 'priority'],
+      }),
+    }),
+  },
+  required: ['riskLevel', 'riskScore', 'summary', 'complianceFrameworks', 'findings', 'remediations'],
+});
+
+export function parseStructuredAudit(rawJson: string): StructuredAuditReport | null {
+  try {
+    const cleaned = rawJson
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/, '');
+    const parsed = JSON.parse(cleaned) as Partial<StructuredAuditReport>;
+    if (
+      !parsed ||
+      typeof parsed.summary !== 'string' ||
+      !Array.isArray(parsed.findings) ||
+      !Array.isArray(parsed.remediations)
+    ) {
+      return null;
+    }
+    const level = String(parsed.riskLevel || 'MEDIUM').toUpperCase();
+    const riskLevel = (
+      ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(level) ? level : 'MEDIUM'
+    ) as StructuredAuditReport['riskLevel'];
+    const score = Math.max(0, Math.min(100, Math.round(Number(parsed.riskScore ?? 50))));
+    return {
+      riskLevel,
+      riskScore: score,
+      summary: parsed.summary,
+      complianceFrameworks: Array.isArray(parsed.complianceFrameworks)
+        ? parsed.complianceFrameworks.map(String).slice(0, 6)
+        : [],
+      findings: parsed.findings.slice(0, 8).map((f) => ({
+        title: String(f.title || 'Finding'),
+        severity: (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(String(f.severity).toUpperCase())
+          ? String(f.severity).toUpperCase()
+          : 'MEDIUM') as StructuredFinding['severity'],
+        detail: String(f.detail || ''),
+      })),
+      remediations: parsed.remediations.slice(0, 8).map((r) => ({
+        step: String(r.step || ''),
+        priority: (['IMMEDIATE', 'SHORT_TERM', 'LONG_TERM'].includes(
+          String(r.priority).toUpperCase()
+        )
+          ? String(r.priority).toUpperCase()
+          : 'IMMEDIATE') as StructuredRemediation['priority'],
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function structuredAuditToMarkdown(report: StructuredAuditReport): string {
+  const frameworks =
+    report.complianceFrameworks.length > 0
+      ? `\n**Compliance Frameworks:** ${report.complianceFrameworks.join(', ')}\n`
+      : '';
+  const findingsMd = report.findings
+    .map((f) => `- **[${f.severity}] ${f.title}:** ${f.detail}`)
+    .join('\n');
+  const remMd = report.remediations
+    .map((r, i) => `${i + 1}. **[${r.priority}]** ${r.step}`)
+    .join('\n');
+
+  return [
+    `### Risk Level`,
+    `**${report.riskLevel}** (Score: ${report.riskScore}/100) — ${report.summary}`,
+    frameworks,
+    `### Top Security & Compliance Findings`,
+    findingsMd,
+    `\n### Immediate Remediation Checklist`,
+    remMd,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
 function makeCacheKey(
   prompt: string,
   modeKey: ModeKey,
   cloudModel: string,
+  style: string,
+  useStructured: boolean,
   image: AttachedImage | null
 ): string {
   const imgSig = image ? `${image.name}:${image.base64Data.length}` : 'no-img';
-  return `${modeKey}|${cloudModel}|${imgSig}|${prompt}`;
+  return `${modeKey}|${cloudModel}|${style}|${useStructured ? 'json' : 'md'}|${imgSig}|${prompt}`;
+}
+
+function getSystemInstruction(style = 'concise_executive'): string {
+  const base =
+    'You are PrivaGuard AI, a privacy-first security & document intelligence analyst. ' +
+    'ALWAYS preserve bracketed privacy tokens (such as [SECRET_1], [EMAIL_1], [PERSON_1], [CARD_1], [ID_1], [PHONE_1], [IP_1]) verbatim. ' +
+    'Never attempt to guess, decode, or alter placeholders.';
+
+  if (style === 'detailed_auditor') {
+    return `${base} Be thorough, cite exact token references, and prioritize compliance frameworks (SOC2, HIPAA, GDPR, PCI-DSS, OWASP).`;
+  }
+  if (style === 'developer_actionable') {
+    return `${base} Optimize for engineers: include concrete remediation commands, rotation checklists, and root-cause triage.`;
+  }
+  return `${base} Be crisp, executive-ready, and high-signal with zero filler.`;
 }
 
 export function toInferenceMode(key: ModeKey): InferenceMode {
@@ -97,7 +248,9 @@ async function runSingleStream(
   parts: Array<string | Part>,
   modeKey: ModeKey,
   cloudModel: string,
+  systemPromptStyle: string,
   started: number,
+  useStructuredAudit: boolean,
   onChunk?: (partialText: string) => void,
   signal?: AbortSignal
 ): Promise<HybridResponse> {
@@ -106,6 +259,15 @@ async function runSingleStream(
   const model = getGenerativeModel(ai, {
     model: cloudModel,
     mode: toInferenceMode(modeKey),
+    systemInstruction: getSystemInstruction(systemPromptStyle),
+    ...(useStructuredAudit && modeKey !== 'ONLY_ON_DEVICE'
+      ? {
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: SECURITY_AUDIT_SCHEMA,
+          },
+        }
+      : {}),
   });
 
   try {
@@ -119,7 +281,10 @@ async function runSingleStream(
       if (chunkText) {
         if (ttftMs === 0) ttftMs = Math.round(performance.now() - started);
         accumulated += chunkText;
-        onChunk?.(accumulated);
+        // For structured JSON mode, wait until complete JSON parses cleanly before rendering Markdown
+        if (!useStructuredAudit) {
+          onChunk?.(accumulated);
+        }
       }
     }
     if (signal?.aborted) {
@@ -129,10 +294,15 @@ async function runSingleStream(
       text: () => string;
       inferenceSource?: string;
     };
-    const finalText = accumulated || finalResp.text();
+    const rawText = accumulated || finalResp.text();
     const latencyMs = Math.round(performance.now() - started);
     const inferenceSource = detectSource(finalResp.inferenceSource, modeKey);
-    const wasMockEcho = /not available in chromium|echoing back/i.test(finalText);
+    const wasMockEcho = /not available in chromium|echoing back/i.test(rawText);
+
+    const structuredAudit =
+      useStructuredAudit && !wasMockEcho ? parseStructuredAudit(rawText) : null;
+    const finalText = structuredAudit ? structuredAuditToMarkdown(structuredAudit) : rawText;
+    onChunk?.(finalText);
 
     return {
       text: finalText,
@@ -141,6 +311,7 @@ async function runSingleStream(
       ttftMs: ttftMs || latencyMs,
       modelUsed: inferenceSource === 'ON_DEVICE' ? 'Gemini Nano (On-Device)' : `${cloudModel} (Cloud)`,
       wasMockEcho,
+      structuredAudit,
     };
   } catch (streamErr) {
     if (signal?.aborted || (streamErr instanceof DOMException && streamErr.name === 'AbortError')) {
@@ -149,8 +320,13 @@ async function runSingleStream(
     if (isRateLimitOrTransientError(streamErr)) {
       throw streamErr;
     }
-    // Fallback to non-streaming generateContent if browser on-device stream throws
-    const result = await model.generateContent(parts);
+    // Fallback to plain Markdown non-streaming generateContent (e.g. Gemini Nano on-device without schema support)
+    const fallbackModel = getGenerativeModel(ai, {
+      model: cloudModel,
+      mode: toInferenceMode(modeKey),
+      systemInstruction: getSystemInstruction(systemPromptStyle),
+    });
+    const result = await fallbackModel.generateContent(parts);
     if (signal?.aborted) {
       throw new DOMException('Analysis cancelled by user.', 'AbortError');
     }
@@ -171,14 +347,16 @@ async function runSingleStream(
       ttftMs: latencyMs,
       modelUsed: inferenceSource === 'ON_DEVICE' ? 'Gemini Nano (On-Device)' : `${cloudModel} (Cloud)`,
       wasMockEcho,
+      structuredAudit: null,
     };
   }
 }
 
 /**
  * Streaming Hybrid Inference via Firebase AI Logic SDK.
- * Includes in-memory instant cache, AbortSignal cancellation, and automatic
- * rate-limit (HTTP 429 / 503) fallback to gemini-2.5-flash-lite for multi-user resilience.
+ * Supports Structured JSON Schema (`responseSchema`) for Security Audits with automatic
+ * Markdown fallback for Gemini Nano on-device, LRU caching, AbortSignal cancellation,
+ * and automatic 429/503 fallback to gemini-2.5-flash-lite.
  */
 export async function generateHybridStream(
   prompt: string,
@@ -186,9 +364,11 @@ export async function generateHybridStream(
   cloudModel = 'gemini-2.5-flash',
   image: AttachedImage | null = null,
   onChunk?: (partialText: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  systemPromptStyle = 'concise_executive',
+  useStructuredAudit = false
 ): Promise<HybridResponse> {
-  const cacheKey = makeCacheKey(prompt, modeKey, cloudModel, image);
+  const cacheKey = makeCacheKey(prompt, modeKey, cloudModel, systemPromptStyle, useStructuredAudit, image);
   const cached = responseCache.get(cacheKey);
   if (cached && !cached.wasMockEcho) {
     onChunk?.(cached.text);
@@ -208,7 +388,16 @@ export async function generateHybridStream(
   }
 
   try {
-    const res = await runSingleStream(parts, modeKey, cloudModel, started, onChunk, signal);
+    const res = await runSingleStream(
+      parts,
+      modeKey,
+      cloudModel,
+      systemPromptStyle,
+      started,
+      useStructuredAudit,
+      onChunk,
+      signal
+    );
     if (!res.wasMockEcho) {
       if (responseCache.size >= MAX_CACHE_ENTRIES) {
         const firstKey = responseCache.keys().next().value;
@@ -221,15 +410,20 @@ export async function generateHybridStream(
     if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
       throw err;
     }
-    // Multi-user resilience: if primary model hits 429 / 503, retry with fast lite model
-    if (isRateLimitOrTransientError(err) && cloudModel !== FALLBACK_CLOUD_MODEL && modeKey !== 'ONLY_ON_DEVICE') {
+    if (
+      isRateLimitOrTransientError(err) &&
+      cloudModel !== FALLBACK_CLOUD_MODEL &&
+      modeKey !== 'ONLY_ON_DEVICE'
+    ) {
       await new Promise((r) => setTimeout(r, 600));
       if (signal?.aborted) throw new DOMException('Analysis cancelled by user.', 'AbortError');
       const fallbackRes = await runSingleStream(
         parts,
         modeKey,
         FALLBACK_CLOUD_MODEL,
+        systemPromptStyle,
         started,
+        useStructuredAudit,
         onChunk,
         signal
       );
@@ -244,10 +438,44 @@ export async function generateHybridStream(
   }
 }
 
-/**
- * Stage 1 (On-Device): Ask Gemini Nano to find person names / company names strictly on-device.
- * Only called when Gemini Nano is actually available on-device (zero wasted delay otherwise).
- */
+export async function generateFollowUpStream(
+  redactedDoc: string,
+  previousAnalysis: string,
+  history: FollowUpMessage[],
+  redactedQuestion: string,
+  modeKey: ModeKey,
+  cloudModel = 'gemini-2.5-flash',
+  systemPromptStyle = 'concise_executive',
+  onChunk?: (partialText: string) => void,
+  signal?: AbortSignal
+): Promise<HybridResponse> {
+  const transcript = history
+    .slice(-6)
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`)
+    .join('\n\n');
+
+  const prompt = [
+    'Continue answering questions about the anonymized document below. Preserve all bracketed tokens like [SECRET_1], [PERSON_1], [EMAIL_1] exactly.',
+    `\n--- ANONYMIZED DOCUMENT ---\n${redactedDoc.slice(0, 4000)}`,
+    `\n--- INITIAL ANALYSIS ---\n${previousAnalysis.slice(0, 2500)}`,
+    transcript ? `\n--- RECENT FOLLOW-UPS ---\n${transcript}` : '',
+    `\n--- USER QUESTION ---\n${redactedQuestion}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return generateHybridStream(
+    prompt,
+    modeKey,
+    cloudModel,
+    null,
+    onChunk,
+    signal,
+    systemPromptStyle,
+    false
+  );
+}
+
 export async function detectEntitiesOnDevice(rawText: string): Promise<{
   entities: string[];
   usedOnDeviceAI: boolean;
@@ -259,23 +487,43 @@ export async function detectEntitiesOnDevice(rawText: string): Promise<{
       model: 'gemini-2.5-flash',
       mode: InferenceMode.ONLY_ON_DEVICE,
     });
-    const res = await model.generateContent(
-      `Extract ONLY proper names of people, street addresses, and private company names from the text below. Return a plain comma-separated list with no explanation. If none, return NONE.\n\nText:\n${rawText.slice(0, 1500)}`
-    );
-    const latencyMs = Math.round(performance.now() - started);
-    const cleaned = res.response.text().trim();
-    if (
-      !cleaned ||
-      cleaned.toUpperCase() === 'NONE' ||
-      /not available|echoing back/i.test(cleaned)
-    ) {
-      return { entities: [], usedOnDeviceAI: false, latencyMs };
+
+    const chunkSize = 1500;
+    const overlap = 150;
+    const chunks: string[] = [];
+    for (let pos = 0; pos < rawText.length && chunks.length < 3; pos += chunkSize - overlap) {
+      chunks.push(rawText.slice(pos, pos + chunkSize));
+      if (pos + chunkSize >= rawText.length) break;
     }
-    const entities = cleaned
-      .split(/[,\n]+/)
-      .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
-      .filter((s) => s.length >= 3 && s.length <= 45 && !s.includes(':') && s.split(/\s+/).length <= 4);
-    return { entities, usedOnDeviceAI: true, latencyMs };
+
+    const found = new Set<string>();
+    let anyRealAI = false;
+
+    for (const chunk of chunks) {
+      const res = await model.generateContent(
+        `Extract ONLY proper names of people, street addresses, and private company names from the text below. Return a plain comma-separated list with no explanation. If none, return NONE.\n\nText:\n${chunk}`
+      );
+      const cleaned = res.response.text().trim();
+      if (
+        !cleaned ||
+        cleaned.toUpperCase() === 'NONE' ||
+        /not available|echoing back/i.test(cleaned)
+      ) {
+        continue;
+      }
+      anyRealAI = true;
+      cleaned
+        .split(/[,\n]+/)
+        .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
+        .filter((s) => s.length >= 3 && s.length <= 45 && !s.includes(':') && s.split(/\s+/).length <= 4)
+        .forEach((e) => found.add(e));
+    }
+
+    return {
+      entities: Array.from(found),
+      usedOnDeviceAI: anyRealAI,
+      latencyMs: Math.round(performance.now() - started),
+    };
   } catch {
     return {
       entities: [],
@@ -286,6 +534,21 @@ export async function detectEntitiesOnDevice(rawText: string): Promise<{
 }
 
 export type AnalysisTask = 'executive' | 'risk_audit' | 'action_plan' | 'quick_offline';
+
+export interface ParsedRiskBanner {
+  level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  summary: string;
+}
+
+export function extractRiskBanner(markdown: string): ParsedRiskBanner | null {
+  const match = markdown.match(
+    /(?:###\s*Risk Level[\s\S]{0,40}?|\*\*Risk Level\*\*[:\s]*)\b(Critical|High|Medium|Low)\b([^\n]*)/i
+  );
+  if (!match) return null;
+  const level = match[1].toUpperCase() as ParsedRiskBanner['level'];
+  const summary = match[2].replace(/^[\s:—–-]+/, '').trim();
+  return { level, summary };
+}
 
 export function buildTaskPrompt(redactedText: string, task: AnalysisTask, hasImage = false): string {
   const keepTokensRule =
@@ -298,7 +561,7 @@ export function buildTaskPrompt(redactedText: string, task: AnalysisTask, hasIma
     case 'quick_offline':
       return `${keepTokensRule}${imageHint}\nGive a crisp 3-bullet summary and 1-sentence tone assessment of the following anonymized note:\n\n${redactedText}`;
     case 'risk_audit':
-      return `${keepTokensRule}${imageHint}\nYou are a Senior Security & Legal Auditor. Analyze this anonymized document and output Markdown with:\n### Risk Level\n(Low / Medium / High / Critical + 1-sentence reason)\n### Top 3 Compliance or Security Risks\n- bullet points referencing exact placeholders\n### Immediate Remediation Steps\n1. numbered action steps\n\nDocument:\n${redactedText}`;
+      return `${keepTokensRule}${imageHint}\nYou are a Senior Security & Legal Auditor. Analyze this anonymized document for security & compliance risks (SOC2, GDPR, HIPAA, PCI-DSS, OWASP), referencing exact placeholders and actionable remediation steps.\n\nDocument:\n${redactedText}`;
     case 'action_plan':
       return `${keepTokensRule}${imageHint}\nExtract a prioritized Action Plan in Markdown from this anonymized document:\n### Urgent Next Steps (24h)\n### Owners & Deliverables\n### Follow-up Checklist\n\nDocument:\n${redactedText}`;
     case 'executive':

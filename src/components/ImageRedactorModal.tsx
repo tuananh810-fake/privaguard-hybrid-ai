@@ -27,6 +27,14 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
   const [imgLoaded, setImgLoaded] = useState(false);
 
   useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
     const img = new Image();
     img.onload = () => {
       imgRef.current = img;
@@ -51,9 +59,8 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-    // Draw committed black redaction bars
     for (const box of boxes) {
-      ctx.fillStyle = '#020617';
+      ctx.fillStyle = '#090C10';
       ctx.fillRect(box.x, box.y, box.w, box.h);
       ctx.strokeStyle = '#10b981';
       ctx.lineWidth = 1.5;
@@ -67,9 +74,8 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
       }
     }
 
-    // Draw active selection box
     if (draft) {
-      ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.22)';
       ctx.fillRect(draft.x, draft.y, draft.w, draft.h);
       ctx.strokeStyle = '#34d399';
       ctx.setLineDash([4, 3]);
@@ -113,12 +119,18 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
   function handleApply() {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const dataUrl = canvas.toDataURL('image/png');
+    // Compress to WebP (or JPEG fallback) to cut multimodal upload payload by 60-80%
+    let mimeType = 'image/webp';
+    let dataUrl = canvas.toDataURL('image/webp', 0.86);
+    if (!dataUrl.startsWith('data:image/webp')) {
+      mimeType = 'image/jpeg';
+      dataUrl = canvas.toDataURL('image/jpeg', 0.86);
+    }
     const base64Data = dataUrl.split(',')[1] || '';
     onApply(
       {
         ...image,
-        mimeType: 'image/png',
+        mimeType,
         base64Data,
         previewUrl: dataUrl,
       },
@@ -127,16 +139,22 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-3xl rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Local image privacy redactor"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#090C10]/85 p-4 backdrop-blur-sm"
+    >
+      <div className="w-full max-w-3xl rounded-2xl border border-[#1E2733] bg-[#10151C] p-5 shadow-2xl">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
             <ShieldCheck className="h-4 w-4 text-emerald-400" />
-            Local Image Privacy Redactor (Zero-Leak Canvas)
+            Local Image Privacy Redactor
           </h3>
           <button
+            type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white"
+            className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
             aria-label="Close image redactor"
           >
             <X className="h-4 w-4" />
@@ -144,10 +162,10 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
         </div>
 
         <p className="mb-3 text-xs text-slate-400">
-          Click and drag directly on the image to paint permanent black <code className="text-emerald-300">[REDACTED]</code> bars over names, faces, IDs, or card numbers. Pixels are flattened locally in browser RAM before anything is sent to Hybrid AI.
+          Drag directly on the image to paint permanent black <code className="text-emerald-300">[REDACTED]</code> bars over names, faces, IDs, or card numbers. Pixels are flattened and compressed locally to WebP before anything reaches Hybrid AI.
         </p>
 
-        <div className="flex max-h-[55vh] items-center justify-center overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-2">
+        <div className="flex max-h-[55vh] items-center justify-center overflow-auto rounded-xl border border-[#1E2733] bg-[#090C10] p-2">
           <canvas
             ref={canvasRef}
             onPointerDown={handlePointerDown}
@@ -160,36 +178,40 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={() => setBoxes((prev) => prev.slice(0, -1))}
               disabled={boxes.length === 0}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-lg border border-[#1E2733] bg-[#0C1016] px-3 py-1.5 text-xs text-slate-200 hover:border-slate-600 disabled:opacity-40"
             >
               <Undo2 className="h-3.5 w-3.5" />
               Undo ({boxes.length})
             </button>
             <button
+              type="button"
               onClick={() => setBoxes([])}
               disabled={boxes.length === 0}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-300 hover:text-rose-300 disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-lg border border-[#1E2733] bg-[#0C1016] px-3 py-1.5 text-xs text-slate-300 hover:text-rose-300 disabled:opacity-40"
             >
               <Eraser className="h-3.5 w-3.5" />
-              Clear Masks
+              Clear masks
             </button>
           </div>
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={onClose}
-              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+              className="rounded-lg border border-[#1E2733] px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
             >
               Cancel
             </button>
             <button
+              type="button"
               onClick={handleApply}
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400"
             >
               <ShieldCheck className="h-3.5 w-3.5" />
-              Apply Local Mask ({boxes.length})
+              Apply local mask ({boxes.length})
             </button>
           </div>
         </div>
