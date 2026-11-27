@@ -1,17 +1,65 @@
 @import "tailwindcss";
 
 :root {
-  --pg-bg: #090c10;
-  --pg-surface: #10151c;
-  --pg-surface-recessed: #0c1016;
-  --pg-border: #1e2733;
+  --n-bg: #ffffff;
+  --n-surface: #f7f7f5;
+  --n-hover: #efefee;
+  --n-border: #e9e9e7;
+  --n-border-strong: #d3d1cb;
+  --n-text: #37352f;
+  --n-muted: #787774;
+  --n-accent: #0f7b6c;
+  --n-accent-hover: #0b6357;
+  --n-accent-fg: #ffffff;
+  --n-accent-soft: #edf7f5;
+  --n-accent-border: #c5e3dd;
+  --n-danger: #c9372c;
+  --n-danger-soft: #fdf2f2;
+  --n-danger-border: #f5c6c6;
+  --n-warn: #b45309;
+  --n-warn-soft: #fef6ec;
+  --n-warn-border: #f3d6b3;
+  --n-code-bg: #f7f7f5;
+  --n-overlay: rgba(15, 15, 15, 0.28);
+}
+
+.dark {
+  --n-bg: #191919;
+  --n-surface: #202020;
+  --n-hover: #2c2c2c;
+  --n-border: #2f2f2f;
+  --n-border-strong: #3f3f3f;
+  --n-text: #e6e6e4;
+  --n-muted: #9b9a97;
+  --n-accent: #34d399;
+  --n-accent-hover: #22c188;
+  --n-accent-fg: #0b1f18;
+  --n-accent-soft: rgba(52, 211, 153, 0.12);
+  --n-accent-border: rgba(52, 211, 153, 0.28);
+  --n-danger: #ff7369;
+  --n-danger-soft: rgba(255, 115, 105, 0.12);
+  --n-danger-border: rgba(255, 115, 105, 0.3);
+  --n-warn: #f59e0b;
+  --n-warn-soft: rgba(245, 158, 11, 0.12);
+  --n-warn-border: rgba(245, 158, 11, 0.3);
+  --n-code-bg: #202020;
+  --n-overlay: rgba(0, 0, 0, 0.55);
 }
 
 @layer base {
+  html,
   body {
-    font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background-color: var(--pg-bg);
-    color: #f1f5f9;
+    background-color: var(--n-bg);
+    color: var(--n-text);
+    font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  ::selection {
+    background-color: var(--n-accent-soft);
+    color: var(--n-text);
   }
 
   code,
@@ -25,7 +73,7 @@
   input:focus-visible,
   select:focus-visible,
   textarea:focus-visible {
-    outline: 2px solid rgba(16, 185, 129, 0.75);
+    outline: 2px solid var(--n-accent);
     outline-offset: 2px;
   }
 }
@@ -40,18 +88,18 @@
   }
 }
 
-/* Subtle custom scrollbars for sleek dark workbench */
+/* Quiet Notion scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(12, 16, 22, 0.6);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(71, 85, 105, 0.55);
+  background: var(--n-border-strong);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.85);
+  background: var(--n-muted);
 }

@@ -5,14 +5,23 @@ import { VaultEntry } from '../services/piiVault';
 const TOKEN_REGEX = /(\[(?:SECRET|CARD|ID|EMAIL|PHONE|IP|PERSON|CUSTOM)_\d+\])/g;
 const EXACT_TOKEN_REGEX = /^\[(?:SECRET|CARD|ID|EMAIL|PHONE|IP|PERSON|CUSTOM)_\d+\]$/;
 
+/**
+ * Calm Notion-style inline pill colors (subtle pastel in Light mode, muted tint in Dark mode).
+ */
 function tokenStyle(token: string): string {
-  if (token.startsWith('[SECRET_')) return 'bg-rose-500/15 text-rose-300 ring-rose-500/40 hover:bg-rose-500/25';
-  if (token.startsWith('[CARD_')) return 'bg-amber-500/15 text-amber-300 ring-amber-500/40 hover:bg-amber-500/25';
-  if (token.startsWith('[ID_')) return 'bg-orange-500/15 text-orange-300 ring-orange-500/40 hover:bg-orange-500/25';
-  if (token.startsWith('[EMAIL_')) return 'bg-sky-500/15 text-sky-300 ring-sky-500/40 hover:bg-sky-500/25';
-  if (token.startsWith('[PHONE_')) return 'bg-violet-500/15 text-violet-300 ring-violet-500/40 hover:bg-violet-500/25';
-  if (token.startsWith('[IP_')) return 'bg-cyan-500/15 text-cyan-300 ring-cyan-500/40 hover:bg-cyan-500/25';
-  return 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/40 hover:bg-emerald-500/25';
+  if (token.startsWith('[SECRET_'))
+    return 'bg-[#FBE4E4] text-[#9B2C2C] dark:bg-[#3A2222] dark:text-[#FCA5A5]';
+  if (token.startsWith('[CARD_'))
+    return 'bg-[#FAEBDD] text-[#9A4D0B] dark:bg-[#38291A] dark:text-[#FCD34D]';
+  if (token.startsWith('[ID_'))
+    return 'bg-[#FBF3DB] text-[#8A5A00] dark:bg-[#352C18] dark:text-[#FDE68A]';
+  if (token.startsWith('[EMAIL_'))
+    return 'bg-[#DDEBF1] text-[#1D5B79] dark:bg-[#1B2F3A] dark:text-[#7DD3FC]';
+  if (token.startsWith('[PHONE_'))
+    return 'bg-[#EAE4F2] text-[#5B3B8C] dark:bg-[#2C2338] dark:text-[#C4B5FD]';
+  if (token.startsWith('[IP_'))
+    return 'bg-[#E1F2F0] text-[#0F685B] dark:bg-[#19322E] dark:text-[#6EE7B7]';
+  return 'bg-[#DDEDEA] text-[#0F7B6C] dark:bg-[#1A332D] dark:text-[#6EE7B7]';
 }
 
 interface TokenChipProps {
@@ -27,7 +36,7 @@ const InteractiveTokenChip: React.FC<TokenChipProps> = memo(({ token, vaultLooku
   if (!entry) {
     return (
       <span
-        className={`mx-0.5 inline-block rounded px-1.5 py-0.5 font-mono text-[11px] font-medium ring-1 ${tokenStyle(token)}`}
+        className={`mx-0.5 inline-block rounded px-1.5 py-0.5 font-mono text-[12px] font-medium ${tokenStyle(token)}`}
       >
         {token}
       </span>
@@ -38,11 +47,11 @@ const InteractiveTokenChip: React.FC<TokenChipProps> = memo(({ token, vaultLooku
     <button
       type="button"
       onClick={() => setPeek((v) => !v)}
-      title={peek ? 'Click to re-mask token' : 'Click to peek original value locally'}
-      className={`mx-0.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] font-medium ring-1 transition ${
+      title={peek ? 'Click to hide again' : 'Click to peek original value locally'}
+      className={`mx-0.5 inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[12px] font-medium transition ${
         peek
-          ? 'bg-amber-500/20 text-amber-200 ring-amber-400/60'
-          : tokenStyle(token)
+          ? 'bg-[var(--n-warn-soft)] text-[var(--n-warn)] ring-1 ring-[var(--n-warn-border)]'
+          : `${tokenStyle(token)} hover:opacity-85`
       }`}
     >
       {peek ? entry.original : token}
@@ -60,14 +69,14 @@ function renderInline(text: string, vaultLookup?: Record<string, VaultEntry>): R
     if (!part) return null;
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
       return (
-        <strong key={idx} className="font-semibold text-white">
+        <strong key={idx} className="font-semibold text-[var(--n-text)]">
           {renderInline(part.slice(2, -2), vaultLookup)}
         </strong>
       );
     }
     if (part.startsWith('*') && part.endsWith('*') && !part.startsWith('**') && part.length > 2) {
       return (
-        <em key={idx} className="italic text-slate-300">
+        <em key={idx} className="italic text-[var(--n-muted)]">
           {renderInline(part.slice(1, -1), vaultLookup)}
         </em>
       );
@@ -76,7 +85,7 @@ function renderInline(text: string, vaultLookup?: Record<string, VaultEntry>): R
       return (
         <code
           key={idx}
-          className="rounded bg-slate-800/90 px-1.5 py-0.5 font-mono text-[11px] text-emerald-300"
+          className="rounded bg-[var(--n-surface)] px-1.5 py-0.5 font-mono text-[12.5px] text-[var(--n-danger)]"
         >
           {part.slice(1, -1)}
         </code>
@@ -120,7 +129,6 @@ function parseMarkdownBlocks(markdown: string): MdBlock[] {
   while (i < lines.length) {
     const trimmed = lines[i].trim();
 
-    // Fenced code block ```
     if (trimmed.startsWith('```')) {
       const lang = trimmed.slice(3).trim();
       const codeLines: string[] = [];
@@ -134,7 +142,6 @@ function parseMarkdownBlocks(markdown: string): MdBlock[] {
       continue;
     }
 
-    // Markdown table
     if (
       trimmed.includes('|') &&
       i + 1 < lines.length &&
@@ -175,24 +182,28 @@ const CopyableCodeBlock: React.FC<{ lang: string; content: string }> = memo(({ l
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
-      // ignore clipboard error in restricted contexts
+      // ignore clipboard errors
     }
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-[#1E2733] bg-[#090C10]">
-      <div className="flex items-center justify-between border-b border-[#1E2733] bg-[#0D1117] px-3 py-1">
-        <span className="font-mono text-[10px] text-slate-400">{lang || 'code'}</span>
+    <div className="overflow-x-auto rounded-md border border-[var(--n-border)] bg-[var(--n-code-bg)]">
+      <div className="flex items-center justify-between border-b border-[var(--n-border)] px-3 py-1.5">
+        <span className="font-mono text-[11px] text-[var(--n-muted)]">{lang || 'code'}</span>
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-400 transition hover:bg-slate-800 hover:text-white"
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
         >
-          {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+          {copied ? (
+            <Check className="h-3 w-3 text-[var(--n-accent)]" />
+          ) : (
+            <Copy className="h-3 w-3" />
+          )}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="p-3 font-mono text-xs leading-relaxed text-emerald-200">
+      <pre className="p-3.5 font-mono text-[12.5px] leading-relaxed text-[var(--n-text)]">
         <code>{content}</code>
       </pre>
     </div>
@@ -212,7 +223,7 @@ export const RichOutput = memo(
     const blocks = parseMarkdownBlocks(markdown);
 
     return (
-      <div className="space-y-2.5 text-[13px] leading-relaxed text-slate-200">
+      <div className="space-y-2.5 text-[15px] leading-[1.65] text-[var(--n-text)]">
         {blocks.map((block, i) => {
           if (block.type === 'code') {
             return <CopyableCodeBlock key={i} lang={block.lang} content={block.content} />;
@@ -222,11 +233,11 @@ export const RichOutput = memo(
             return (
               <div
                 key={i}
-                className="overflow-x-auto rounded-lg border border-[#1E2733] bg-[#090C10]"
+                className="overflow-x-auto rounded-md border border-[var(--n-border)] bg-[var(--n-bg)]"
               >
-                <table className="w-full border-collapse text-left text-xs">
+                <table className="w-full border-collapse text-left text-[13.5px]">
                   <thead>
-                    <tr className="border-b border-[#1E2733] bg-[#10151C] text-slate-300">
+                    <tr className="border-b border-[var(--n-border)] bg-[var(--n-surface)] text-[var(--n-text)]">
                       {block.headers.map((h, hi) => (
                         <th key={hi} className="px-3 py-2 font-semibold">
                           {renderInline(h, vaultLookup)}
@@ -234,11 +245,11 @@ export const RichOutput = memo(
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#1E2733]/70">
+                  <tbody className="divide-y divide-[var(--n-border)]">
                     {block.rows.map((row, ri) => (
-                      <tr key={ri} className="hover:bg-slate-900/40">
+                      <tr key={ri} className="hover:bg-[var(--n-surface)]">
                         {row.map((cell, ci) => (
-                          <td key={ci} className="px-3 py-2 text-slate-300">
+                          <td key={ci} className="px-3 py-2 text-[var(--n-text)]">
                             {renderInline(cell, vaultLookup)}
                           </td>
                         ))}
@@ -255,21 +266,21 @@ export const RichOutput = memo(
 
           if (line.startsWith('### ')) {
             return (
-              <h3 key={i} className="pt-2 text-sm font-semibold text-emerald-300">
+              <h3 key={i} className="pt-3 text-[16px] font-semibold tracking-tight text-[var(--n-text)]">
                 {renderInline(line.slice(4), vaultLookup)}
               </h3>
             );
           }
           if (line.startsWith('## ')) {
             return (
-              <h2 key={i} className="pt-2 text-[15px] font-semibold text-white">
+              <h2 key={i} className="pt-3 text-[18px] font-semibold tracking-tight text-[var(--n-text)]">
                 {renderInline(line.slice(3), vaultLookup)}
               </h2>
             );
           }
           if (line.startsWith('# ')) {
             return (
-              <h1 key={i} className="pt-2 text-base font-bold text-white">
+              <h1 key={i} className="pt-3 text-[20px] font-bold tracking-tight text-[var(--n-text)]">
                 {renderInline(line.slice(2), vaultLookup)}
               </h1>
             );
@@ -278,7 +289,7 @@ export const RichOutput = memo(
             return (
               <blockquote
                 key={i}
-                className="border-l-2 border-emerald-500/60 bg-emerald-500/5 py-1 pl-3 text-slate-300"
+                className="border-l-[3px] border-[var(--n-border-strong)] pl-3.5 text-[var(--n-muted)]"
               >
                 {renderInline(line.slice(2), vaultLookup)}
               </blockquote>
@@ -287,7 +298,7 @@ export const RichOutput = memo(
           if (/^[-*•]\s+/.test(line)) {
             return (
               <div key={i} className="flex gap-2.5 pl-1">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--n-muted)]" />
                 <div className="flex-1">
                   {renderInline(line.replace(/^[-*•]\s+/, ''), vaultLookup)}
                 </div>
@@ -298,7 +309,7 @@ export const RichOutput = memo(
           if (numMatch) {
             return (
               <div key={i} className="flex gap-2.5 pl-1">
-                <span className="font-mono text-xs font-semibold text-sky-400">
+                <span className="font-mono text-[13px] font-medium text-[var(--n-muted)]">
                   {numMatch[1]}.
                 </span>
                 <div className="flex-1">{renderInline(numMatch[2], vaultLookup)}</div>

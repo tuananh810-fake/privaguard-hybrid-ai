@@ -60,24 +60,24 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
     for (const box of boxes) {
-      ctx.fillStyle = '#090C10';
+      ctx.fillStyle = '#191919';
       ctx.fillRect(box.x, box.y, box.w, box.h);
-      ctx.strokeStyle = '#10b981';
+      ctx.strokeStyle = '#0F7B6C';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(box.x, box.y, box.w, box.h);
-      ctx.fillStyle = '#34d399';
-      ctx.font = 'bold 11px monospace';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '500 11px monospace';
       if (Math.abs(box.w) > 58 && Math.abs(box.h) > 16) {
         const rx = box.w < 0 ? box.x + box.w : box.x;
         const ry = box.h < 0 ? box.y + box.h : box.y;
-        ctx.fillText('[REDACTED]', rx + 6, ry + 14);
+        ctx.fillText('[HIDDEN]', rx + 6, ry + 14);
       }
     }
 
     if (draft) {
-      ctx.fillStyle = 'rgba(16, 185, 129, 0.22)';
+      ctx.fillStyle = 'rgba(15, 123, 108, 0.22)';
       ctx.fillRect(draft.x, draft.y, draft.w, draft.h);
-      ctx.strokeStyle = '#34d399';
+      ctx.strokeStyle = '#0F7B6C';
       ctx.setLineDash([4, 3]);
       ctx.lineWidth = 1.5;
       ctx.strokeRect(draft.x, draft.y, draft.w, draft.h);
@@ -119,7 +119,6 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
   function handleApply() {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    // Compress to WebP (or JPEG fallback) to cut multimodal upload payload by 60-80%
     let mimeType = 'image/webp';
     let dataUrl = canvas.toDataURL('image/webp', 0.86);
     if (!dataUrl.startsWith('data:image/webp')) {
@@ -142,36 +141,36 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Local image privacy redactor"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#090C10]/85 p-4 backdrop-blur-sm"
+      aria-label="Hide private areas on image"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--n-overlay)] p-4"
     >
-      <div className="w-full max-w-3xl rounded-2xl border border-[#1E2733] bg-[#10151C] p-5 shadow-2xl">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
-            <ShieldCheck className="h-4 w-4 text-emerald-400" />
-            Local Image Privacy Redactor
+      <div className="w-full max-w-3xl rounded-xl border border-[var(--n-border)] bg-[var(--n-bg)] p-5">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="flex items-center gap-2 text-[15px] font-semibold text-[var(--n-text)]">
+            <ShieldCheck className="h-4 w-4 text-[var(--n-accent)]" />
+            Hide private areas on image
           </h3>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+            className="rounded-md p-1 text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
             aria-label="Close image redactor"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <p className="mb-3 text-xs text-slate-400">
-          Drag directly on the image to paint permanent black <code className="text-emerald-300">[REDACTED]</code> bars over names, faces, IDs, or card numbers. Pixels are flattened and compressed locally to WebP before anything reaches Hybrid AI.
+        <p className="mb-3 text-[13px] text-[var(--n-muted)]">
+          Drag over names, faces, IDs, or card numbers to cover them before analysis. Everything is flattened locally on your device.
         </p>
 
-        <div className="flex max-h-[55vh] items-center justify-center overflow-auto rounded-xl border border-[#1E2733] bg-[#090C10] p-2">
+        <div className="flex max-h-[55vh] items-center justify-center overflow-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-2">
           <canvas
             ref={canvasRef}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
-            className="max-w-full cursor-crosshair rounded shadow-md touch-none"
+            className="max-w-full cursor-crosshair rounded touch-none"
           />
         </div>
 
@@ -181,7 +180,7 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
               type="button"
               onClick={() => setBoxes((prev) => prev.slice(0, -1))}
               disabled={boxes.length === 0}
-              className="inline-flex items-center gap-1 rounded-lg border border-[#1E2733] bg-[#0C1016] px-3 py-1.5 text-xs text-slate-200 hover:border-slate-600 disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-3 py-1.5 text-[13px] text-[var(--n-text)] transition hover:bg-[var(--n-hover)] disabled:opacity-40"
             >
               <Undo2 className="h-3.5 w-3.5" />
               Undo ({boxes.length})
@@ -190,10 +189,10 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
               type="button"
               onClick={() => setBoxes([])}
               disabled={boxes.length === 0}
-              className="inline-flex items-center gap-1 rounded-lg border border-[#1E2733] bg-[#0C1016] px-3 py-1.5 text-xs text-slate-300 hover:text-rose-300 disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[13px] text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-danger)] disabled:opacity-40"
             >
               <Eraser className="h-3.5 w-3.5" />
-              Clear masks
+              Clear
             </button>
           </div>
 
@@ -201,17 +200,17 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-[#1E2733] px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+              className="rounded-md px-3 py-1.5 text-[13px] text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={handleApply}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400"
+              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--n-accent)] px-4 py-1.5 text-[13px] font-medium text-[var(--n-accent-fg)] transition hover:bg-[var(--n-accent-hover)]"
             >
               <ShieldCheck className="h-3.5 w-3.5" />
-              Apply local mask ({boxes.length})
+              Apply mask ({boxes.length})
             </button>
           </div>
         </div>

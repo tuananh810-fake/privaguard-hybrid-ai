@@ -1,24 +1,22 @@
 import React, { memo, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowRight,
   Check,
   CheckCircle2,
   Cloud,
   Copy,
   Cpu,
-  Database,
   Download,
   Eye,
   EyeOff,
   FileWarning,
-  Gauge,
-  MessageSquare,
   RefreshCw,
+  Save,
   Send,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
-  Zap,
 } from 'lucide-react';
 import {
   extractRiskBanner,
@@ -46,23 +44,18 @@ interface AnalysisOutputPanelProps {
   copied: boolean;
   onCopyReport: () => void;
   onExportMarkdown: () => void;
+  onQuickStart: () => void;
   followUps: FollowUpMessage[];
   followUpStreaming: string;
   followUpRunning: boolean;
   onSendFollowUp: (question: string) => void;
 }
 
-const RISK_STYLES = {
-  CRITICAL: 'border-rose-500/40 bg-rose-500/10 text-rose-200',
-  HIGH: 'border-orange-500/40 bg-orange-500/10 text-orange-200',
-  MEDIUM: 'border-amber-500/40 bg-amber-500/10 text-amber-200',
-  LOW: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
-};
-
-const PRIORITY_STYLES = {
-  IMMEDIATE: 'bg-rose-500/20 text-rose-300 ring-rose-500/40',
-  SHORT_TERM: 'bg-amber-500/20 text-amber-300 ring-amber-500/40',
-  LONG_TERM: 'bg-sky-500/20 text-sky-300 ring-sky-500/40',
+const SEVERITY_BADGE: Record<string, string> = {
+  CRITICAL: 'bg-[var(--n-danger-soft)] text-[var(--n-danger)]',
+  HIGH: 'bg-[var(--n-warn-soft)] text-[var(--n-warn)]',
+  MEDIUM: 'bg-[var(--n-warn-soft)] text-[var(--n-warn)]',
+  LOW: 'bg-[var(--n-accent-soft)] text-[var(--n-accent)]',
 };
 
 const StructuredAuditView: React.FC<{
@@ -75,38 +68,46 @@ const StructuredAuditView: React.FC<{
   const completedCount = Object.values(checked).filter(Boolean).length;
   const format = (s: string) => (rehydrate ? rehydrateLocally(s, vault) : s);
 
-  const scoreColor =
-    report.riskScore >= 80
-      ? 'bg-rose-500'
-      : report.riskScore >= 60
-        ? 'bg-orange-500'
-        : report.riskScore >= 35
-          ? 'bg-amber-400'
-          : 'bg-emerald-400';
+  const barColor =
+    report.riskScore >= 75
+      ? 'bg-[var(--n-danger)]'
+      : report.riskScore >= 40
+        ? 'bg-[var(--n-warn)]'
+        : 'bg-[var(--n-accent)]';
 
   return (
-    <div className="space-y-4">
-      {/* Risk Score & Compliance Frameworks */}
-      <div className={`rounded-xl border p-3.5 ${RISK_STYLES[report.riskLevel]}`}>
+    <div className="space-y-6">
+      {/* Notion Callout for Overall Risk */}
+      <div className="rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-bold">
-            <ShieldAlert className="h-4 w-4" />
-            <span>STRUCTURED AUDIT · {report.riskLevel}</span>
+          <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--n-text)]">
+            <ShieldAlert className="h-4 w-4 text-[var(--n-warn)]" />
+            <span>Risk level:</span>
+            <span
+              className={`rounded px-2 py-0.5 text-[12px] font-medium ${SEVERITY_BADGE[report.riskLevel]}`}
+            >
+              {report.riskLevel.charAt(0) + report.riskLevel.slice(1).toLowerCase()}
+            </span>
           </div>
-          <span className="font-mono text-xs font-bold">Risk Score: {report.riskScore}/100</span>
+          <span className="font-mono text-[12.5px] text-[var(--n-muted)]">
+            Score {report.riskScore}/100
+          </span>
         </div>
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-950/60">
-          <div className={`h-full rounded-full ${scoreColor}`} style={{ width: `${report.riskScore}%` }} />
+
+        <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--n-border)]">
+          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${report.riskScore}%` }} />
         </div>
-        <div className="mt-2 text-xs leading-relaxed">
+
+        <div className="mt-3 text-[14.5px] leading-[1.6] text-[var(--n-text)]">
           <HighlightedRedactedText text={format(report.summary)} vaultLookup={vaultLookup} />
         </div>
+
         {report.complianceFrameworks.length > 0 && (
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {report.complianceFrameworks.map((fw) => (
               <span
                 key={fw}
-                className="rounded-md bg-slate-950/60 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide ring-1 ring-white/15"
+                className="rounded border border-[var(--n-border)] bg-[var(--n-bg)] px-2 py-0.5 font-mono text-[11px] text-[var(--n-muted)]"
               >
                 {fw}
               </span>
@@ -115,28 +116,28 @@ const StructuredAuditView: React.FC<{
         )}
       </div>
 
-      {/* Structured Findings */}
+      {/* Findings List */}
       <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-          Compliance &amp; Security Findings ({report.findings.length})
+        <h3 className="mb-3 text-[16px] font-semibold tracking-tight text-[var(--n-text)]">
+          Key findings
         </h3>
-        <div className="space-y-2">
+        <div className="space-y-3">
           {report.findings.map((f, idx) => (
             <div
               key={idx}
-              className="rounded-xl border border-[#1E2733] bg-[#10151C] p-3 text-xs"
+              className="border-b border-[var(--n-border)] pb-3 last:border-b-0 last:pb-0"
             >
               <div className="mb-1 flex items-center justify-between gap-2">
-                <span className="font-semibold text-white">{format(f.title)}</span>
+                <span className="text-[14.5px] font-medium text-[var(--n-text)]">
+                  {format(f.title)}
+                </span>
                 <span
-                  className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ring-1 ${
-                    RISK_STYLES[f.severity]
-                  }`}
+                  className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${SEVERITY_BADGE[f.severity]}`}
                 >
-                  {f.severity}
+                  {f.severity.charAt(0) + f.severity.slice(1).toLowerCase()}
                 </span>
               </div>
-              <div className="text-slate-300">
+              <div className="text-[14px] leading-[1.6] text-[var(--n-muted)]">
                 <HighlightedRedactedText text={format(f.detail)} vaultLookup={vaultLookup} />
               </div>
             </div>
@@ -144,13 +145,13 @@ const StructuredAuditView: React.FC<{
         </div>
       </div>
 
-      {/* Interactive Remediation Checklist */}
+      {/* Interactive Notion To-Do Checklist */}
       <div>
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Remediation Checklist
+        <div className="mb-2.5 flex items-center justify-between">
+          <h3 className="text-[16px] font-semibold tracking-tight text-[var(--n-text)]">
+            Recommended next steps
           </h3>
-          <span className="font-mono text-[11px] text-emerald-400">
+          <span className="font-mono text-[12px] text-[var(--n-muted)]">
             {completedCount}/{report.remediations.length} done
           </span>
         </div>
@@ -160,26 +161,17 @@ const StructuredAuditView: React.FC<{
             return (
               <label
                 key={idx}
-                className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-2.5 text-xs transition ${
-                  isDone
-                    ? 'border-emerald-500/30 bg-emerald-500/5 text-slate-400 line-through'
-                    : 'border-[#1E2733] bg-[#10151C] text-slate-200 hover:border-slate-600'
+                className={`flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-[14.5px] transition hover:bg-[var(--n-surface)] ${
+                  isDone ? 'text-[var(--n-muted)] line-through' : 'text-[var(--n-text)]'
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={isDone}
                   onChange={() => setChecked((prev) => ({ ...prev, [idx]: !prev[idx] }))}
-                  className="mt-0.5 h-3.5 w-3.5 rounded accent-emerald-500"
+                  className="mt-1 h-4 w-4 rounded accent-[var(--n-accent)]"
                 />
-                <div className="flex-1">
-                  <span
-                    className={`mr-2 inline-block rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ring-1 ${
-                      PRIORITY_STYLES[r.priority]
-                    }`}
-                  >
-                    {r.priority.replace('_', ' ')}
-                  </span>
+                <div className="flex-1 leading-[1.6]">
                   <HighlightedRedactedText text={format(r.step)} vaultLookup={vaultLookup} />
                 </div>
               </label>
@@ -211,6 +203,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
     copied,
     onCopyReport,
     onExportMarkdown,
+    onQuickStart,
     followUps,
     followUpStreaming,
     followUpRunning,
@@ -233,41 +226,31 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
     }
 
     return (
-      <section className="flex flex-1 flex-col rounded-2xl border border-[#1E2733] bg-[#10151C] p-5 shadow-xl">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[#1E2733] pb-3">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
-            <Sparkles className="h-4 w-4 text-sky-400" />
-            AI analysis
-          </h2>
+      <section className="flex min-h-[calc(100vh-49px)] flex-col bg-[var(--n-bg)] px-6 py-7 sm:px-10">
+        {/* Clean Page Header */}
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-[22px] font-bold tracking-tight text-[var(--n-text)]">Analysis</h2>
 
           {result && (
-            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${
-                  result.inferenceSource === 'ON_DEVICE'
-                    ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/40'
-                    : 'bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/40'
-                }`}
-              >
+            <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--n-muted)]">
+              <span className="inline-flex items-center gap-1 rounded-md bg-[var(--n-surface)] px-2 py-0.5 text-[var(--n-text)]">
                 {result.inferenceSource === 'ON_DEVICE' ? (
-                  <Cpu className="h-3 w-3" />
+                  <Cpu className="h-3.5 w-3.5 text-[var(--n-accent)]" />
                 ) : (
-                  <Cloud className="h-3 w-3" />
+                  <Cloud className="h-3.5 w-3.5 text-[var(--n-accent)]" />
                 )}
-                {result.inferenceSource === 'ON_DEVICE' ? 'On-Device Nano' : 'Cloud Gemini'}
+                {result.inferenceSource === 'ON_DEVICE' ? 'On-device Nano' : 'Cloud Gemini'}
               </span>
-              {result.structuredAudit && (
-                <span className="rounded-full bg-indigo-500/15 px-2 py-0.5 font-medium text-indigo-300 ring-1 ring-indigo-500/35">
-                  Structured JSON
-                </span>
-              )}
+              <span className="font-mono">
+                Shield {shieldTimeMs < 1 ? '<1ms' : `${shieldTimeMs}ms`} · AI {result.latencyMs}ms
+              </span>
               {result.cached && (
-                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-medium text-emerald-300">
-                  Instant cache
+                <span className="rounded bg-[var(--n-accent-soft)] px-1.5 py-0.5 text-[var(--n-accent)]">
+                  Cached
                 </span>
               )}
               {result.fallbackUsed && (
-                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-300">
+                <span className="rounded bg-[var(--n-warn-soft)] px-1.5 py-0.5 text-[var(--n-warn)]">
                   Lite fallback
                 </span>
               )}
@@ -275,83 +258,43 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
           )}
         </div>
 
-        {/* Hybrid Benchmark Telemetry Card */}
-        {result && (
-          <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl border border-[#1E2733] bg-[#0C1016] p-2.5 sm:grid-cols-4">
-            <div className="rounded-lg bg-[#090C10] px-2.5 py-1.5">
-              <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                <ShieldCheck className="h-3 w-3 text-emerald-400" />
-                On-Device Shield
-              </div>
-              <div className="mt-0.5 font-mono text-xs font-semibold text-emerald-300">
-                {shieldTimeMs < 1 ? '<1ms' : `${shieldTimeMs}ms`}
-              </div>
-            </div>
-            <div className="rounded-lg bg-[#090C10] px-2.5 py-1.5">
-              <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                <Zap className="h-3 w-3 text-amber-400" />
-                AI First Token
-              </div>
-              <div className="mt-0.5 font-mono text-xs font-semibold text-amber-300">
-                {result.ttftMs}ms
-              </div>
-            </div>
-            <div className="rounded-lg bg-[#090C10] px-2.5 py-1.5">
-              <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                <Gauge className="h-3 w-3 text-sky-400" />
-                Total Latency
-              </div>
-              <div className="mt-0.5 font-mono text-xs font-semibold text-sky-300">
-                {result.latencyMs}ms
-              </div>
-            </div>
-            <div className="rounded-lg bg-[#090C10] px-2.5 py-1.5">
-              <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                <ShieldAlert className="h-3 w-3 text-indigo-400" />
-                Kept in RAM
-              </div>
-              <div className="mt-0.5 font-mono text-xs font-semibold text-white">
-                {bytesShielded}B <span className="text-[10px] text-emerald-400">(0 leaked)</span>
-              </div>
-            </div>
-          </div>
-        )}
-
+        {/* Error Callout */}
         {errorMsg && (
-          <div className="mb-3 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3.5 text-xs text-rose-200">
-            <div className="mb-1 flex items-center gap-1.5 font-semibold text-rose-300">
+          <div className="mb-4 rounded-lg border border-[var(--n-danger-border)] bg-[var(--n-danger-soft)] p-3.5 text-[13.5px] text-[var(--n-danger)]">
+            <div className="mb-1 flex items-center gap-1.5 font-semibold">
               <FileWarning className="h-4 w-4" />
-              Analysis interrupted
+              Something went wrong
             </div>
-            <p className="leading-relaxed opacity-90">{errorMsg}</p>
+            <p className="leading-relaxed">{errorMsg}</p>
           </div>
         )}
 
+        {/* Mock Nano Notice */}
         {result?.wasMockEcho && (
-          <div className="mb-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
-            Local Gemini Nano weights aren&apos;t downloaded yet in this browser. Open{' '}
-            <strong>Privacy &amp; Tech</strong> and switch to <strong>Fast Cloud</strong> (or disable{' '}
-            <strong>Offline Sim</strong>) for live Gemini Cloud inference.
+          <div className="mb-4 rounded-lg border border-[var(--n-warn-border)] bg-[var(--n-warn-soft)] p-3.5 text-[13px] text-[var(--n-warn)]">
+            Local Gemini Nano isn&apos;t downloaded in this browser yet. Open{' '}
+            <strong>Settings</strong> and choose <strong>Fast Cloud</strong> (or turn off Offline
+            mode) for live analysis.
           </div>
         )}
 
+        {/* Notion Callout for Markdown Risk Banner */}
         {riskBanner && (
-          <div
-            className={`mb-3 flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs ${RISK_STYLES[riskBanner.level]}`}
-          >
-            {riskBanner.level === 'CRITICAL' || riskBanner.level === 'HIGH' ? (
-              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            ) : (
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            )}
+          <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-4 py-3 text-[14px]">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--n-warn)]" />
             <div>
-              <span className="font-semibold">Risk severity: {riskBanner.level}</span>
-              {riskBanner.summary && <span className="ml-1.5 opacity-90">{riskBanner.summary}</span>}
+              <span className="font-semibold text-[var(--n-text)]">
+                Risk level: {riskBanner.level.charAt(0) + riskBanner.level.slice(1).toLowerCase()}
+              </span>
+              {riskBanner.summary && (
+                <span className="ml-1.5 text-[var(--n-muted)]">{riskBanner.summary}</span>
+              )}
             </div>
           </div>
         )}
 
-        <div className="min-h-[340px] flex-1 overflow-y-auto rounded-xl border border-[#1E2733] bg-[#090C10] p-5">
+        {/* Main Editorial Reading Area */}
+        <div className="flex-1 overflow-y-auto">
           {result?.structuredAudit ? (
             <>
               <StructuredAuditView
@@ -361,41 +304,32 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                 vaultLookup={vaultLookup}
               />
 
-              {/* Follow-up Q&A Thread */}
               {(followUps.length > 0 || followUpStreaming) && (
-                <div className="mt-6 space-y-3 border-t border-[#1E2733] pt-4">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
-                    <MessageSquare className="h-3.5 w-3.5 text-sky-400" />
-                    Private follow-up Q&amp;A
-                  </div>
+                <div className="mt-8 space-y-4 border-t border-[var(--n-border)] pt-6">
                   {followUps.map((msg) => {
                     const text = rehydrate ? rehydrateLocally(msg.text, vault) : msg.text;
                     return (
-                      <div
-                        key={msg.id}
-                        className={`rounded-xl p-3 text-xs ${
-                          msg.role === 'user'
-                            ? 'ml-6 border border-[#1E2733] bg-[#10151C] text-slate-200'
-                            : 'border border-sky-500/20 bg-sky-500/5 text-slate-200'
-                        }`}
-                      >
+                      <div key={msg.id}>
                         {msg.role === 'user' ? (
-                          <p className="font-medium text-white">{text}</p>
+                          <p className="rounded-lg bg-[var(--n-surface)] px-3.5 py-2.5 text-[14px] font-medium text-[var(--n-text)]">
+                            {text}
+                          </p>
                         ) : (
-                          <RichOutput markdown={text} vaultLookup={vaultLookup} />
+                          <div className="pl-1">
+                            <RichOutput markdown={text} vaultLookup={vaultLookup} />
+                          </div>
                         )}
                       </div>
                     );
                   })}
                   {followUpStreaming && (
-                    <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3">
+                    <div className="pl-1">
                       <RichOutput
                         markdown={
                           rehydrate ? rehydrateLocally(followUpStreaming, vault) : followUpStreaming
                         }
                         vaultLookup={vaultLookup}
                       />
-                      <span className="mt-1 inline-block h-3.5 w-2 animate-pulse rounded-sm bg-sky-400" />
                     </div>
                   )}
                 </div>
@@ -405,174 +339,156 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
             <>
               <RichOutput markdown={displayedMarkdown} vaultLookup={vaultLookup} />
               {running && (
-                <span className="mt-2 inline-block h-4 w-2 animate-pulse rounded-sm bg-emerald-400" />
+                <span className="mt-2 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-[var(--n-accent)]" />
               )}
 
-              {/* Follow-up Q&A Thread */}
               {(followUps.length > 0 || followUpStreaming) && (
-                <div className="mt-6 space-y-3 border-t border-[#1E2733] pt-4">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
-                    <MessageSquare className="h-3.5 w-3.5 text-sky-400" />
-                    Private follow-up Q&amp;A
-                  </div>
+                <div className="mt-8 space-y-4 border-t border-[var(--n-border)] pt-6">
                   {followUps.map((msg) => {
                     const text = rehydrate ? rehydrateLocally(msg.text, vault) : msg.text;
                     return (
-                      <div
-                        key={msg.id}
-                        className={`rounded-xl p-3 text-xs ${
-                          msg.role === 'user'
-                            ? 'ml-6 border border-[#1E2733] bg-[#10151C] text-slate-200'
-                            : 'border border-sky-500/20 bg-sky-500/5 text-slate-200'
-                        }`}
-                      >
+                      <div key={msg.id}>
                         {msg.role === 'user' ? (
-                          <p className="font-medium text-white">{text}</p>
+                          <p className="rounded-lg bg-[var(--n-surface)] px-3.5 py-2.5 text-[14px] font-medium text-[var(--n-text)]">
+                            {text}
+                          </p>
                         ) : (
-                          <RichOutput markdown={text} vaultLookup={vaultLookup} />
+                          <div className="pl-1">
+                            <RichOutput markdown={text} vaultLookup={vaultLookup} />
+                          </div>
                         )}
                       </div>
                     );
                   })}
                   {followUpStreaming && (
-                    <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3">
+                    <div className="pl-1">
                       <RichOutput
                         markdown={
                           rehydrate ? rehydrateLocally(followUpStreaming, vault) : followUpStreaming
                         }
                         vaultLookup={vaultLookup}
                       />
-                      <span className="mt-1 inline-block h-3.5 w-2 animate-pulse rounded-sm bg-sky-400" />
                     </div>
                   )}
                 </div>
               )}
             </>
           ) : running ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 py-12 text-center">
-              <RefreshCw className="h-6 w-6 animate-spin text-emerald-400" />
-              <div className="text-sm font-medium text-slate-200">
-                Shielded {vault.length} secrets locally — streaming AI response...
-              </div>
-              <p className="text-xs text-slate-500">Zero bytes of raw PII sent over the network</p>
+            <div className="flex h-full min-h-[280px] flex-col items-center justify-center gap-2.5 text-center">
+              <RefreshCw className="h-5 w-5 animate-spin text-[var(--n-accent)]" />
+              <p className="text-[14.5px] font-medium text-[var(--n-text)]">
+                Protected {vault.length} private item{vault.length === 1 ? '' : 's'} ({bytesShielded}B) on this device
+              </p>
+              <p className="text-[13px] text-[var(--n-muted)]">
+                Streaming safe AI analysis...
+              </p>
             </div>
           ) : (
-            <div className="flex h-full flex-col items-center justify-center py-8 text-center">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 ring-1 ring-emerald-500/30">
-                <ShieldCheck className="h-6 w-6 text-emerald-400" />
+            <div className="flex h-full min-h-[300px] flex-col items-center justify-center text-center">
+              <div className="mb-3.5 flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--n-surface)] text-[var(--n-accent)]">
+                <ShieldCheck className="h-5 w-5" />
               </div>
-              <h3 className="text-sm font-semibold text-white">
-                Ready to analyze — zero data leaked
-              </h3>
-              <p className="mt-1 max-w-md text-xs text-slate-400">
-                Select a sample or paste your own text on the left, then click{' '}
-                <strong>Analyze safely</strong> (or press <strong>Ctrl+Enter</strong>).
+              <p className="max-w-sm text-[15px] text-[var(--n-text)]">
+                Your private details stay on this device while AI summarizes or audits the safe version.
               </p>
-
-              <div className="mt-6 grid w-full max-w-lg grid-cols-1 gap-2.5 text-left sm:grid-cols-3">
-                <div className="rounded-xl border border-[#1E2733] bg-[#10151C] p-3">
-                  <div className="text-xs font-semibold text-emerald-400">1. Auto-mask</div>
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    Keys, JWTs, cards, phones &amp; IDs stay in local browser RAM.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-[#1E2733] bg-[#10151C] p-3">
-                  <div className="text-xs font-semibold text-sky-400">2. Hybrid AI</div>
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    Only safe tokens reach Gemini Nano or Cloud Gemini.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-[#1E2733] bg-[#10151C] p-3">
-                  <div className="text-xs font-semibold text-slate-200">3. Re-hydrate</div>
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    Click any token to peek locally or restore all details in 1 click.
-                  </p>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={onQuickStart}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-3.5 py-1.5 text-[13.5px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)]"
+              >
+                Analyze this sample
+                <ArrowRight className="h-3.5 w-3.5 text-[var(--n-muted)]" />
+              </button>
             </div>
           )}
         </div>
 
-        {/* Private Follow-up Input (appears once analysis completes) */}
-        {result && !running && (
-          <form onSubmit={handleFollowUpSubmit} className="mt-3 flex gap-2">
-            <input
-              type="text"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              disabled={followUpRunning}
-              placeholder="Ask a follow-up (e.g., Email bob@corp.com a Slack alert) — inherits vault cleanly..."
-              className="flex-1 rounded-xl border border-[#1E2733] bg-[#090C10] px-3.5 py-2 text-xs text-slate-200 placeholder:text-slate-500 outline-none focus:border-sky-500"
-            />
-            <button
-              type="submit"
-              disabled={!question.trim() || followUpRunning}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-sky-500/20 px-3.5 py-2 text-xs font-semibold text-sky-300 ring-1 ring-sky-500/40 transition hover:bg-sky-500/30 disabled:opacity-40"
-            >
-              {followUpRunning ? (
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Send className="h-3.5 w-3.5" />
-              )}
-              Ask
-            </button>
-          </form>
-        )}
-
-        {savedNotice && (
-          <div className="mt-2.5 flex items-center gap-1.5 text-xs text-emerald-400">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            {savedNotice}
-          </div>
-        )}
-
-        {/* Action Bar */}
+        {/* Quiet Ghost Action Bar + Notion AI Follow-up Input */}
         {result && (
-          <div className="mt-3.5 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={onToggleRehydrate}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                rehydrate
-                  ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/50'
-                  : 'bg-[#0C1016] text-slate-200 ring-1 ring-[#1E2733] hover:border-slate-600'
-              }`}
-            >
-              {rehydrate ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-              {rehydrate ? 'Hide original details' : 'Show original details'}
-            </button>
+          <div className="mt-5 space-y-3 border-t border-[var(--n-border)] pt-4">
+            {savedNotice && (
+              <div className="flex items-center gap-1.5 text-[12.5px] text-[var(--n-accent)]">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {savedNotice}
+              </div>
+            )}
 
-            <button
-              type="button"
-              onClick={onSaveToFirestore}
-              disabled={savingHistory}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500/15 px-3 py-1.5 text-xs font-semibold text-sky-200 ring-1 ring-sky-500/35 hover:bg-sky-500/25 disabled:opacity-50"
-            >
-              <Database className="h-3.5 w-3.5" />
-              {savingHistory ? 'Saving...' : 'Save report'}
-            </button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={onToggleRehydrate}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition ${
+                  rehydrate
+                    ? 'bg-[var(--n-warn-soft)] text-[var(--n-warn)]'
+                    : 'text-[var(--n-text)] hover:bg-[var(--n-hover)]'
+                }`}
+              >
+                {rehydrate ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {rehydrate ? 'Hide real names' : 'Show real names'}
+              </button>
 
-            <button
-              type="button"
-              onClick={onCopyReport}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[#0C1016] px-3 py-1.5 text-xs font-medium text-slate-200 ring-1 ring-[#1E2733] hover:bg-slate-800"
-            >
-              {copied ? (
-                <Check className="h-3.5 w-3.5 text-emerald-400" />
-              ) : (
-                <Copy className="h-3.5 w-3.5" />
-              )}
-              {copied ? 'Copied' : 'Copy'}
-            </button>
+              <button
+                type="button"
+                onClick={onSaveToFirestore}
+                disabled={savingHistory}
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)] disabled:opacity-45"
+              >
+                <Save className="h-3.5 w-3.5" />
+                {savingHistory ? 'Saving...' : 'Save'}
+              </button>
 
-            <button
-              type="button"
-              onClick={onExportMarkdown}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[#0C1016] px-3 py-1.5 text-xs font-medium text-slate-200 ring-1 ring-[#1E2733] hover:bg-slate-800"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Export .md
-            </button>
+              <button
+                type="button"
+                onClick={onCopyReport}
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+              >
+                {copied ? (
+                  <Check className="h-3.5 w-3.5 text-[var(--n-accent)]" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+
+              <button
+                type="button"
+                onClick={onExportMarkdown}
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export
+              </button>
+            </div>
+
+            {/* Slim Notion AI Follow-up Bar */}
+            {!running && (
+              <form
+                onSubmit={handleFollowUpSubmit}
+                className="flex items-center gap-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-1.5 focus-within:border-[var(--n-accent)]"
+              >
+                <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--n-muted)]" />
+                <input
+                  type="text"
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  disabled={followUpRunning}
+                  placeholder="Ask a follow-up question (private details auto-hidden)..."
+                  className="flex-1 bg-transparent py-1 text-[13.5px] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={!question.trim() || followUpRunning}
+                  className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[12.5px] font-medium text-[var(--n-accent)] transition hover:bg-[var(--n-hover)] disabled:opacity-40"
+                >
+                  {followUpRunning ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
+                  Ask
+                </button>
+              </form>
+            )}
           </div>
         )}
       </section>

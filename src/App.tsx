@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { KeyRound, ShieldCheck, SlidersHorizontal, Wifi, WifiOff, X } from 'lucide-react';
+import { KeyRound, Moon, Settings, ShieldCheck, Sun, X } from 'lucide-react';
 import { loadRemoteSettings, RemoteSettings } from './firebase';
 import { SAMPLE_DOCUMENTS } from './data/samples';
 import {
@@ -44,7 +44,14 @@ const ImageRedactorModal = lazy(() =>
   import('./components/ImageRedactorModal').then((m) => ({ default: m.ImageRedactorModal }))
 );
 
+type ThemeMode = 'light' | 'dark';
+
 export default function App() {
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof localStorage === 'undefined') return 'light';
+    return localStorage.getItem('privaguard_theme') === 'dark' ? 'dark' : 'light';
+  });
+
   const [rawText, setRawText] = useState(SAMPLE_DOCUMENTS[0].content);
   const deferredRawText = useDeferredValue(rawText);
 
@@ -102,6 +109,15 @@ export default function App() {
     typeof window !== 'undefined' &&
     (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
 
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    try {
+      localStorage.setItem('privaguard_theme', theme);
+    } catch {
+      // ignore storage errors
+    }
+  }, [theme]);
+
   const loadHistoryStore = useCallback(async () => {
     if (!historyModuleRef.current) {
       historyModuleRef.current = await import('./services/historyStore');
@@ -122,7 +138,6 @@ export default function App() {
     }
   }, []);
 
-  // Lazy-load Firestore + Anonymous Auth after initial paint so vendor-firestore stays out of initial bundle
   useEffect(() => {
     const onOnline = () => setIsOnline(true);
     const onOffline = () => setIsOnline(false);
@@ -190,7 +205,6 @@ export default function App() {
     [deferredRawText, extraTerms, categories]
   );
 
-  // Unified vault combining document vault + any new tokens discovered in follow-up Q&A (zero collisions)
   const combinedVault = useMemo(() => {
     if (extraFollowUpVault.length === 0) return redaction.vault;
     const seen = new Set(redaction.vault.map((v) => v.token));
@@ -305,7 +319,6 @@ export default function App() {
     setExtraFollowUpVault([]);
     setFollowUpStreaming('');
 
-    // Auto smooth-scroll to output panel on mobile screens
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
       outputContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -374,7 +387,6 @@ export default function App() {
     scheduleStreamUpdate,
   ]);
 
-  // Global keyboard shortcuts: Ctrl/Cmd+Enter to run analysis, Esc to close modals/drawer
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -392,7 +404,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [running, rawText, handleRunPipeline, showDebugModal, showImageRedactor, showTechDrawer]);
 
-  // Follow-up Q&A inherits combinedVault so token counters NEVER collide with document tokens
   const handleSendFollowUp = useCallback(
     async (rawQuestion: string) => {
       if (!result) return;
@@ -411,8 +422,7 @@ export default function App() {
         role: 'user',
         text: redactedQ,
       };
-      const nextHistory = [...followUps, userMsg];
-      setFollowUps(nextHistory);
+      setFollowUps((prev) => [...prev, userMsg]);
       setFollowUpStreaming('');
       setFollowUpRunning(true);
       setErrorMsg(null);
@@ -506,7 +516,7 @@ export default function App() {
         redactedPreview: redaction.redactedText.slice(0, 180),
         analysisText: result.text,
       });
-      setSavedNotice('Saved anonymized report to Cloud Firestore (0 raw PII stored).');
+      setSavedNotice('Saved safely without personal details.');
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
@@ -546,85 +556,64 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#090C10] text-slate-100">
-      {/* Focused Security Workbench Header */}
-      <header className="sticky top-0 z-20 border-b border-[#1E2733] bg-[#090C10]/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3.5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 ring-1 ring-emerald-500/40">
-              <ShieldCheck className="h-5 w-5 text-emerald-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-bold tracking-tight text-white">PrivaGuard AI</h1>
-                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-500/30">
-                  v4.0
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">
-                Analyze private docs with Hybrid AI — secrets stay 100% on your device
-              </p>
-            </div>
-          </div>
+    <div className="min-h-screen bg-[var(--n-bg)] text-[var(--n-text)]">
+      {/* Ultra-clean 48px Notion Topbar */}
+      <header className="sticky top-0 z-20 flex h-12 items-center justify-between border-b border-[var(--n-border)] bg-[var(--n-bg)] px-4 sm:px-6">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-[18px] w-[18px] text-[var(--n-accent)]" />
+          <h1 className="text-[14.5px] font-semibold tracking-tight text-[var(--n-text)]">
+            PrivaGuard
+          </h1>
+        </div>
 
-          <div className="flex items-center gap-2">
-            {/* 1-Click Simulate Offline Toggle for testing On-Device Gemini Nano without cutting Wi-Fi */}
-            <button
-              type="button"
-              onClick={() => setSimulatedOffline((v) => !v)}
-              title="Simulate Offline Mode to test On-Device Gemini Nano without disconnecting Wi-Fi"
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ring-1 transition ${
-                effectiveOnline
-                  ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/30 hover:bg-emerald-500/20'
-                  : 'bg-amber-500/15 text-amber-300 ring-amber-500/40 hover:bg-amber-500/25'
+        <div className="flex items-center gap-1.5">
+          {/* Quiet Status Dot (click to toggle offline simulation) */}
+          <button
+            type="button"
+            onClick={() => setSimulatedOffline((v) => !v)}
+            title="Click to simulate offline on-device mode"
+            className="inline-flex items-center gap-2 rounded-md px-2.5 py-1 text-[12.5px] text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                effectiveOnline ? 'bg-[var(--n-accent)]' : 'bg-[var(--n-warn)]'
               }`}
-            >
-              {effectiveOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
+            />
+            <span className="hidden sm:inline">
               {simulatedOffline
-                ? 'Offline Sim (On-Device)'
-                : isOnline
-                  ? nanoStatus === 'available'
-                    ? 'Hybrid ready'
-                    : 'Protected · Cloud ready'
+                ? 'Offline · On-device'
+                : effectiveOnline
+                  ? 'Protected · Cloud'
                   : 'Offline · On-device'}
-            </button>
+            </span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setShowTechDrawer((v) => !v)}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-                showTechDrawer
-                  ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200'
-                  : 'border-[#1E2733] bg-[#10151C] text-slate-300 hover:border-slate-500 hover:text-white'
-              }`}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Privacy &amp; Tech
-            </button>
-          </div>
+          {/* Settings Slide-Over Trigger */}
+          <button
+            type="button"
+            onClick={() => setShowTechDrawer(true)}
+            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12.5px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+          >
+            <Settings className="h-3.5 w-3.5" />
+            Settings
+          </button>
+
+          {/* Subtle Light / Dark Mode Toggle */}
+          <button
+            type="button"
+            onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+            title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+            aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+            className="rounded-md p-1.5 text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+          >
+            {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          </button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl space-y-5 px-5 py-6">
-        {showTechDrawer && (
-          <TechDrawer
-            mode={mode}
-            onModeChange={setMode}
-            nanoStatus={nanoStatus}
-            isLocalhost={isLocalhost}
-            onOpenDebugModal={() => setShowDebugModal(true)}
-            remoteSettings={remoteSettings}
-            onRefreshRemoteConfig={refreshRemoteConfig}
-            categories={categories}
-            onToggleCategory={handleToggleCategory}
-            customTerms={customTerms}
-            onCustomTermsChange={setCustomTerms}
-            redaction={redaction}
-            onClose={() => setShowTechDrawer(false)}
-          />
-        )}
-
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+      {/* Notion Split-View Workspace */}
+      <main>
+        <div className="grid grid-cols-1 lg:grid-cols-2">
           <DocumentInputPanel
             rawText={rawText}
             onRawTextChange={setRawText}
@@ -651,7 +640,7 @@ export default function App() {
             onStop={handleStop}
           />
 
-          <div ref={outputContainerRef} className="flex flex-col lg:col-span-7">
+          <div ref={outputContainerRef} className="flex flex-col">
             <AnalysisOutputPanel
               result={result}
               displayedMarkdown={displayedMarkdown}
@@ -669,6 +658,7 @@ export default function App() {
               copied={copied}
               onCopyReport={handleCopyReport}
               onExportMarkdown={handleExportMarkdown}
+              onQuickStart={handleRunPipeline}
               followUps={followUps}
               followUpStreaming={followUpStreaming}
               followUpRunning={followUpRunning}
@@ -685,7 +675,29 @@ export default function App() {
         />
       </main>
 
-      {/* Lazy-loaded Local Image Privacy Redactor Modal */}
+      {/* Slide-Over Privacy & Technical Settings */}
+      {showTechDrawer && (
+        <TechDrawer
+          mode={mode}
+          onModeChange={setMode}
+          simulatedOffline={simulatedOffline}
+          onToggleSimulatedOffline={() => setSimulatedOffline((v) => !v)}
+          nanoStatus={nanoStatus}
+          isLocalhost={isLocalhost}
+          onOpenDebugModal={() => setShowDebugModal(true)}
+          remoteSettings={remoteSettings}
+          onRefreshRemoteConfig={refreshRemoteConfig}
+          categories={categories}
+          onToggleCategory={handleToggleCategory}
+          customTerms={customTerms}
+          onCustomTermsChange={setCustomTerms}
+          redaction={redaction}
+          lastResult={result}
+          onClose={() => setShowTechDrawer(false)}
+        />
+      )}
+
+      {/* Lazy-loaded Image Redactor Modal */}
       {showImageRedactor && attachedImage && (
         <Suspense fallback={null}>
           <ImageRedactorModal
@@ -706,46 +718,45 @@ export default function App() {
           role="dialog"
           aria-modal="true"
           aria-label="Localhost App Check Debug Token"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#090C10]/85 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--n-overlay)] p-4"
         >
-          <div className="w-full max-w-md rounded-2xl border border-[#1E2733] bg-[#10151C] p-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-xl border border-[var(--n-border)] bg-[var(--n-bg)] p-5">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 text-sm font-bold text-white">
-                <KeyRound className="h-4 w-4 text-amber-400" />
+              <h3 className="flex items-center gap-2 text-[14.5px] font-semibold text-[var(--n-text)]">
+                <KeyRound className="h-4 w-4 text-[var(--n-warn)]" />
                 Localhost App Check debug token
               </h3>
               <button
                 type="button"
                 onClick={() => setShowDebugModal(false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                className="rounded-md p-1 text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <p className="mb-3 text-xs leading-relaxed text-slate-400">
-              App Check is <strong>Enforced</strong> on Firebase AI Logic. Local testing on{' '}
-              <code>localhost</code> needs a debug token from Firebase Console. Production Hosting
-              on <code>buildhybridai-tuananh.web.app</code> works automatically.
+            <p className="mb-3 text-[13px] leading-relaxed text-[var(--n-muted)]">
+              App Check is enforced on Firebase AI Logic. Local testing on <code>localhost</code>{' '}
+              needs a debug token from Firebase Console. Production Hosting works automatically.
             </p>
             <input
               type="text"
               value={debugTokenInput}
               onChange={(e) => setDebugTokenInput(e.target.value)}
               placeholder="Paste UUID debug token (leave empty to clear)"
-              className="mb-3 w-full rounded-lg border border-[#1E2733] bg-[#090C10] px-3 py-2 font-mono text-xs text-slate-200 outline-none focus:border-emerald-500"
+              className="mb-3 w-full rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-2 font-mono text-[12.5px] text-[var(--n-text)] focus:border-[var(--n-accent)] focus:outline-none"
             />
             <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowDebugModal(false)}
-                className="rounded-lg border border-[#1E2733] px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                className="rounded-md px-3 py-1.5 text-[13px] text-[var(--n-muted)] hover:bg-[var(--n-hover)]"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={saveLocalDebugToken}
-                className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400"
+                className="rounded-md bg-[var(--n-accent)] px-3 py-1.5 text-[13px] font-medium text-[var(--n-accent-fg)] hover:bg-[var(--n-accent-hover)]"
               >
                 Save &amp; reload
               </button>

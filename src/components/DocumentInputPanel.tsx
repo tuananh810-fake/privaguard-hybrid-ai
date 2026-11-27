@@ -1,14 +1,15 @@
-import React, { memo, useMemo, useRef } from 'react';
+import React, { memo, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Code2,
   Columns2,
+  FileText,
   Image as ImageIcon,
+  Paperclip,
   Play,
   RefreshCw,
   ShieldCheck,
   Square,
-  Upload,
   X,
 } from 'lucide-react';
 import { SAMPLE_DOCUMENTS } from '../data/samples';
@@ -74,7 +75,7 @@ const HighlightedRawPii: React.FC<{ rawText: string; vault: VaultEntry[] }> = me
           p.isPii ? (
             <mark
               key={i}
-              className="rounded bg-rose-500/25 px-1 py-0.5 text-rose-200 ring-1 ring-rose-500/40"
+              className="rounded bg-[var(--n-danger-soft)] px-1 py-0.5 text-[var(--n-danger)]"
             >
               {p.text}
             </mark>
@@ -114,28 +115,181 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
   }) => {
     const textFileRef = useRef<HTMLInputElement>(null);
     const imageFileRef = useRef<HTMLInputElement>(null);
+    const [attachMenuOpen, setAttachMenuOpen] = useState(false);
 
     return (
-      <section className="flex flex-col rounded-2xl border border-[#1E2733] bg-[#10151C] p-5 shadow-xl lg:col-span-5">
-        {/* Quick Samples & Upload Bar */}
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-1.5">
+      <section className="flex min-h-[calc(100vh-49px)] flex-col bg-[var(--n-bg)] px-6 py-7 sm:px-10 lg:border-r lg:border-[var(--n-border)]">
+        {/* Notion Page Heading + Subtle Template Chips */}
+        <div className="mb-5">
+          <h2 className="text-[22px] font-bold tracking-tight text-[var(--n-text)]">Document</h2>
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[12px] text-[var(--n-muted)]">Try a sample:</span>
             {SAMPLE_DOCUMENTS.map((s) => (
               <button
                 type="button"
                 key={s.id}
                 onClick={() => onSelectSample(s.content)}
-                className="rounded-lg border border-[#1E2733] bg-[#0C1016] px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:border-emerald-500/50 hover:text-white"
+                className="rounded-md bg-[var(--n-surface)] px-2.5 py-1 text-[12px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)]"
               >
                 {s.label
-                  .replace(' Incident Log', ' Log')
-                  .replace(' Patient Note', ' Note')
+                  .replace(' Incident Log', ' log')
+                  .replace(' Patient Note', ' note')
                   .replace(' & Payout', '')}
               </button>
             ))}
           </div>
+        </div>
 
-          <div className="flex items-center gap-1.5">
+        {/* Clean 2-Tab Bar + Subtle Diff/Payload Inspector Icons */}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--n-border)] pb-2">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onInputTabChange('original')}
+              className={`rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
+                inputTab === 'original'
+                  ? 'bg-[var(--n-surface)] text-[var(--n-text)]'
+                  : 'text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]'
+              }`}
+            >
+              Document
+            </button>
+            <button
+              type="button"
+              onClick={() => onInputTabChange('safe')}
+              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
+                inputTab === 'safe'
+                  ? 'bg-[var(--n-accent-soft)] text-[var(--n-accent)]'
+                  : 'text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]'
+              }`}
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Safe preview ({redaction.vault.length})
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1 text-[12px]">
+            <button
+              type="button"
+              onClick={() => onInputTabChange(inputTab === 'diff' ? 'original' : 'diff')}
+              title="Compare original vs safe payload side-by-side"
+              className={`inline-flex items-center gap-1 rounded-md px-2 py-1 transition ${
+                inputTab === 'diff'
+                  ? 'bg-[var(--n-surface)] font-medium text-[var(--n-text)]'
+                  : 'text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]'
+              }`}
+            >
+              <Columns2 className="h-3.5 w-3.5" />
+              Diff
+            </button>
+            <button
+              type="button"
+              onClick={() => onInputTabChange(inputTab === 'audit' ? 'original' : 'audit')}
+              title="Inspect exact text sent to AI"
+              className={`inline-flex items-center gap-1 rounded-md px-2 py-1 transition ${
+                inputTab === 'audit'
+                  ? 'bg-[var(--n-surface)] font-medium text-[var(--n-text)]'
+                  : 'text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]'
+              }`}
+            >
+              <Code2 className="h-3.5 w-3.5" />
+              Payload
+            </button>
+            <span className="ml-1 hidden items-center gap-1 text-[12px] text-[var(--n-accent)] sm:inline-flex">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {leakCheck === 0 ? '0 leaks' : `${leakCheck} leaks`}
+            </span>
+          </div>
+        </div>
+
+        {/* Clean Notion Editorial Surface */}
+        <div className="flex flex-1 flex-col">
+          {inputTab === 'original' ? (
+            <textarea
+              value={rawText}
+              onChange={(e) => onRawTextChange(e.target.value)}
+              rows={13}
+              placeholder="Paste any private note, log, contract, or medical record here. Sensitive details are hidden automatically on this device..."
+              className="w-full flex-1 resize-none bg-transparent py-2 text-[14.5px] leading-[1.65] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none"
+            />
+          ) : inputTab === 'safe' ? (
+            <div className="flex-1 overflow-y-auto py-2 text-[14.5px] leading-[1.65] text-[var(--n-text)]">
+              <p className="mb-3 text-[12.5px] text-[var(--n-muted)]">
+                This is the safe version sent to AI. Click any highlighted tag to peek the original value locally.
+              </p>
+              <HighlightedRedactedText text={redaction.redactedText} vaultLookup={vaultLookup} />
+            </div>
+          ) : inputTab === 'diff' ? (
+            <div className="grid flex-1 grid-cols-1 gap-4 py-2 sm:grid-cols-2">
+              <div className="overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 text-[13.5px] leading-relaxed">
+                <div className="mb-2 flex items-center justify-between text-[12px] font-medium text-[var(--n-muted)]">
+                  <span>On this device</span>
+                  <span className="font-mono text-[var(--n-danger)]">{redaction.bytesShielded}B private</span>
+                </div>
+                <HighlightedRawPii rawText={rawText} vault={redaction.vault} />
+              </div>
+              <div className="overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 text-[13.5px] leading-relaxed">
+                <div className="mb-2 flex items-center justify-between text-[12px] font-medium text-[var(--n-muted)]">
+                  <span>Sent to AI</span>
+                  <span className="font-mono text-[var(--n-accent)]">
+                    {leakCheck === 0 ? '0B leaked' : `${leakCheck} leaks`}
+                  </span>
+                </div>
+                <HighlightedRedactedText text={redaction.redactedText} vaultLookup={vaultLookup} />
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 font-mono text-[12px] leading-relaxed text-[var(--n-text)]">
+              <div className="mb-2 font-sans text-[12px] font-medium text-[var(--n-muted)]">
+                Exact network payload (0 private bytes included):
+              </div>
+              <pre className="whitespace-pre-wrap">{outgoingPrompt}</pre>
+            </div>
+          )}
+
+          {/* Attached Image Strip */}
+          {attachedImage && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-2 text-[13px]">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <img
+                  src={attachedImage.previewUrl}
+                  alt={attachedImage.name}
+                  className="h-8 w-8 shrink-0 rounded object-cover"
+                />
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-[var(--n-text)]">{attachedImage.name}</div>
+                  <div className="text-[12px] text-[var(--n-muted)]">
+                    {imageMaskCount > 0
+                      ? `${imageMaskCount} area${imageMaskCount > 1 ? 's' : ''} hidden locally`
+                      : 'Click Hide areas to cover private text'}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={onOpenImageRedactor}
+                  className="rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-2.5 py-1 text-[12px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)]"
+                >
+                  Hide areas
+                </button>
+                <button
+                  type="button"
+                  onClick={onRemoveImage}
+                  className="rounded p-1 text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-danger)]"
+                  aria-label="Remove image"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Quiet Bottom Action Toolbar */}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5 border-t border-[var(--n-border)] pt-4">
+          <div className="flex items-center gap-2">
+            {/* Hidden file inputs */}
             <input
               ref={textFileRef}
               type="file"
@@ -150,239 +304,92 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               onChange={onImageUpload}
               className="hidden"
             />
-            <button
-              type="button"
-              onClick={() => textFileRef.current?.click()}
-              title="Upload text or log file"
-              className="inline-flex items-center gap-1 rounded-lg border border-[#1E2733] bg-[#0C1016] px-2.5 py-1 text-xs text-slate-300 hover:border-emerald-500/50 hover:text-white"
-            >
-              <Upload className="h-3.5 w-3.5" />
-              File
-            </button>
-            <button
-              type="button"
-              onClick={() => imageFileRef.current?.click()}
-              title="Upload and mask image locally"
-              className="inline-flex items-center gap-1 rounded-lg border border-[#1E2733] bg-[#0C1016] px-2.5 py-1 text-xs text-slate-300 hover:border-sky-500/50 hover:text-white"
-            >
-              <ImageIcon className="h-3.5 w-3.5" />
-              Image
-            </button>
-          </div>
-        </div>
 
-        {/* Mode Tabs: Original | Masked | Diff | Payload */}
-        <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex rounded-lg bg-[#090C10] p-0.5 ring-1 ring-[#1E2733]">
-            <button
-              type="button"
-              onClick={() => onInputTabChange('original')}
-              className={`rounded-md px-2 py-1 text-xs font-medium transition ${
-                inputTab === 'original'
-                  ? 'bg-[#1A222E] text-white'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Document
-            </button>
-            <button
-              type="button"
-              onClick={() => onInputTabChange('safe')}
-              className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
-                inputTab === 'safe'
-                  ? 'bg-emerald-500/15 text-emerald-300'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <ShieldCheck className="h-3.5 w-3.5" />
-              Masked ({redaction.vault.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => onInputTabChange('diff')}
-              className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
-                inputTab === 'diff'
-                  ? 'bg-amber-500/15 text-amber-300'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Columns2 className="h-3.5 w-3.5" />
-              Diff
-            </button>
-            <button
-              type="button"
-              onClick={() => onInputTabChange('audit')}
-              className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
-                inputTab === 'audit'
-                  ? 'bg-sky-500/15 text-sky-300'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Code2 className="h-3.5 w-3.5" />
-              Payload
-            </button>
-          </div>
-
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            {leakCheck === 0 ? '0 bytes PII leaked' : `${leakCheck} leaks`}
-          </span>
-        </div>
-
-        {/* Editor / Masked / Side-by-Side Diff / Payload */}
-        {inputTab === 'original' ? (
-          <textarea
-            value={rawText}
-            onChange={(e) => onRawTextChange(e.target.value)}
-            rows={11}
-            placeholder="Paste any confidential log, contract, medical note, or upload a file..."
-            className="w-full flex-1 resize-none rounded-xl border border-[#1E2733] bg-[#090C10] p-3.5 font-mono text-xs leading-relaxed text-slate-200 outline-none focus:border-emerald-500"
-          />
-        ) : inputTab === 'safe' ? (
-          <div className="min-h-[236px] flex-1 overflow-y-auto rounded-xl border border-emerald-500/30 bg-[#090C10] p-3.5 font-mono text-xs leading-relaxed text-slate-200">
-            <div className="mb-2 text-[11px] text-slate-400">
-              Click any highlighted token to peek its original value locally.
-            </div>
-            <HighlightedRedactedText text={redaction.redactedText} vaultLookup={vaultLookup} />
-          </div>
-        ) : inputTab === 'diff' ? (
-          <div className="grid min-h-[236px] flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
-            <div className="overflow-y-auto rounded-xl border border-rose-500/30 bg-[#090C10] p-3 font-mono text-[11px] leading-relaxed text-slate-300">
-              <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-rose-400">
-                <span>Local RAM (Raw)</span>
-                <span>{redaction.bytesShielded}B PII</span>
-              </div>
-              <HighlightedRawPii rawText={rawText} vault={redaction.vault} />
-            </div>
-            <div className="overflow-y-auto rounded-xl border border-emerald-500/30 bg-[#090C10] p-3 font-mono text-[11px] leading-relaxed text-slate-200">
-              <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-emerald-400">
-                <span>Sent to AI (Safe)</span>
-                <span>{leakCheck === 0 ? '0B leaked' : `${leakCheck} leaks`}</span>
-              </div>
-              <HighlightedRedactedText text={redaction.redactedText} vaultLookup={vaultLookup} />
-            </div>
-          </div>
-        ) : (
-          <div className="min-h-[236px] flex-1 overflow-y-auto rounded-xl border border-sky-500/30 bg-[#090C10] p-3.5 font-mono text-[11px] leading-relaxed text-sky-100">
-            <div className="mb-2 text-[11px] font-medium text-sky-400">
-              Exact payload sent to AI (0 raw PII):
-            </div>
-            <pre className="whitespace-pre-wrap">{outgoingPrompt}</pre>
-          </div>
-        )}
-
-        {/* Live PII Breakdown Strip */}
-        {redaction.breakdown.length > 0 && (
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            {redaction.breakdown.map((b) => (
-              <span
-                key={b.category}
-                className="rounded-md bg-[#0C1016] px-2 py-0.5 font-mono text-[10px] text-slate-300 ring-1 ring-[#1E2733]"
+            {/* Single + Attach Menu */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setAttachMenuOpen((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)]"
               >
-                {b.category}: <strong className="text-emerald-400">{b.count}</strong>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Attached Image Card */}
-        {attachedImage && (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <img
-                src={attachedImage.previewUrl}
-                alt={attachedImage.name}
-                className="h-8 w-8 shrink-0 rounded object-cover"
-              />
-              <div className="min-w-0">
-                <div className="truncate font-medium text-sky-100">{attachedImage.name}</div>
-                <div
-                  className={`text-[11px] ${
-                    imageMaskCount > 0 ? 'text-emerald-300' : 'text-amber-300'
-                  }`}
-                >
-                  {imageMaskCount > 0
-                    ? `Masked locally (${imageMaskCount} bar${imageMaskCount > 1 ? 's' : ''}) · ${Math.round((attachedImage.base64Data.length * 0.75) / 1024)} KB`
-                    : 'Unmasked — click Redact image to hide private regions'}
+                <Paperclip className="h-3.5 w-3.5 text-[var(--n-muted)]" />
+                Attach
+              </button>
+              {attachMenuOpen && (
+                <div className="absolute bottom-full left-0 z-20 mb-1.5 w-44 rounded-lg border border-[var(--n-border)] bg-[var(--n-bg)] p-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachMenuOpen(false);
+                      textFileRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-[var(--n-text)] hover:bg-[var(--n-hover)]"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-[var(--n-muted)]" />
+                    Text or log file
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachMenuOpen(false);
+                      imageFileRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-[var(--n-text)] hover:bg-[var(--n-hover)]"
+                  >
+                    <ImageIcon className="h-3.5 w-3.5 text-[var(--n-muted)]" />
+                    Image (with mask)
+                  </button>
                 </div>
-              </div>
+              )}
             </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={onOpenImageRedactor}
-                className="rounded-lg bg-emerald-500/20 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-500/40 hover:bg-emerald-500/30"
-              >
-                Redact image
-              </button>
-              <button
-                type="button"
-                onClick={onRemoveImage}
-                className="p-1 text-slate-400 hover:text-rose-300"
-                aria-label="Remove image"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
 
-        {/* Task Selector */}
-        <div className="mt-4">
-          <div className="mb-1.5 text-xs font-medium text-slate-400">Analysis goal</div>
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-2">
-            {TASK_OPTIONS.map((t) => (
+            {/* Compact Goal Dropdown */}
+            <select
+              aria-label="Analysis goal"
+              value={task}
+              onChange={(e) => onTaskChange(e.target.value as AnalysisTask)}
+              className="rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] focus:outline-none"
+            >
+              {TASK_OPTIONS.map((t) => (
+                <option key={t.key} value={t.key}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {running && (
               <button
                 type="button"
-                key={t.key}
-                onClick={() => onTaskChange(t.key)}
-                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
-                  task === t.key
-                    ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/50'
-                    : 'bg-[#0C1016] text-slate-400 ring-1 ring-[#1E2733] hover:text-slate-200'
-                }`}
+                onClick={onStop}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--n-danger)] transition hover:bg-[var(--n-danger-soft)]"
               >
-                {t.label}
+                <Square className="h-3 w-3 fill-current" />
+                Stop
               </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Primary CTA */}
-        <div className="mt-4 flex gap-2">
-          <button
-            type="button"
-            onClick={onRunPipeline}
-            disabled={running || !rawText.trim()}
-            title="Shortcut: Ctrl + Enter"
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-emerald-500/15 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {running ? (
-              <>
-                <RefreshCw className="h-4 w-4 animate-spin" />
-                Analyzing safely...
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 fill-current" />
-                Analyze safely ({redaction.vault.length} shielded)
-              </>
             )}
-          </button>
 
-          {running && (
             <button
               type="button"
-              onClick={onStop}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-500/15 px-3.5 py-2.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/25"
+              onClick={onRunPipeline}
+              disabled={running || !rawText.trim()}
+              title="Shortcut: Ctrl + Enter"
+              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--n-accent)] px-4 py-1.5 text-[13.5px] font-medium text-[var(--n-accent-fg)] transition hover:bg-[var(--n-accent-hover)] disabled:cursor-not-allowed disabled:opacity-45"
             >
-              <Square className="h-3.5 w-3.5 fill-current" />
-              Stop
+              {running ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                  Analyze safely
+                </>
+              )}
             </button>
-          )}
-        </div>
-        <div className="mt-1.5 text-center text-[10px] text-slate-500">
-          Tip: Press <kbd className="rounded bg-[#0C1016] px-1 py-0.5 font-mono ring-1 ring-[#1E2733]">Ctrl+Enter</kbd> to run · <kbd className="rounded bg-[#0C1016] px-1 py-0.5 font-mono ring-1 ring-[#1E2733]">Esc</kbd> to close modals
+          </div>
         </div>
       </section>
     );
