@@ -169,7 +169,10 @@ function isRateLimitOrTransientError(err: unknown): boolean {
     msg.includes('quota') ||
     msg.includes('rate limit') ||
     msg.includes('503') ||
-    msg.includes('overloaded')
+    msg.includes('overloaded') ||
+    msg.includes('404') ||
+    msg.includes('not found') ||
+    msg.includes('not supported')
   );
 }
 

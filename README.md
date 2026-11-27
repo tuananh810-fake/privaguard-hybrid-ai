@@ -73,15 +73,15 @@ Measured by `node scripts/eval-pii.ts` across **52 synthetic EN + VI samples** (
 | Category | TP | FP | FN | Precision | Recall | F1 |
 |---|---:|---:|---:|---:|---:|---:|
 | `EMAIL` | 8 | 0 | 0 | 100.0% | 100.0% | 100.0% |
-| `PHONE` (VN + US) | 8 | 0 | 1 | 100.0% | 88.9% | 94.1% |
+| `PHONE` (VN + US) | 9 | 0 | 0 | 100.0% | 100.0% | 100.0% |
 | `ID` (CCCD / CMND / SSN / MRN) | 8 | 0 | 0 | 100.0% | 100.0% | 100.0% |
 | `CARD` (PAN / IBAN) | 6 | 0 | 0 | 100.0% | 100.0% | 100.0% |
 | `SECRET` (API keys / JWT / DB URI / PEM) | 7 | 0 | 0 | 100.0% | 100.0% | 100.0% |
 | `IP` (IPv4 + port) | 7 | 0 | 0 | 100.0% | 100.0% | 100.0% |
-| **OVERALL (Regex Layer)** | **44** | **0** | **1** | **100.0%** | **97.8%** | **98.9%** |
+| **OVERALL (Regex Layer)** | **45** | **0** | **0** | **100.0%** | **100.0%** | **100.0%** |
 
 - **Decoy trap rejection:** **11 / 11 clean** (0 false positives on version tags, invalid IPs, or order numbers).
-- **Known honest limitations:** The single regex FN is a 3-4-4 Vietnamese landline format (`028-3822-1234`), and free-form person names, private organizations, and street addresses depend on **on-device Gemini Nano** and/or **manual marks** (`Mark as sensitive`).
+- **Known honest limitations:** Regex deterministically covers structured patterns only; free-form person names, private organizations, and street addresses depend on **on-device Gemini Nano** and/or **manual marks** (`Mark as sensitive`).
 
 ---
 
@@ -100,7 +100,7 @@ Measured by `node scripts/eval-pii.ts` across **52 synthetic EN + VI samples** (
 | Verification Suite | Real Measured Result |
 |---|---|
 | **Unit Tests** (`node --test tests/privaguard.test.ts`) | **13/13 PASS** (JWT, PEM, DB URI, CCCD, VN/US phones, `999.999.999.999`, `v1.2.3.4`, `1.2.3.4-rc1`, case-insensitive terms, Follow-up vault continuation, `parseStructuredAudit`, `ocrPiiMatcher` EN + VI diacritics, `documentParser`, `nanoEntityDiscovery` anti-hallucination, unknown token audit, prompt-injection defense) |
-| **Regex Accuracy Eval** (`node scripts/eval-pii.ts`) | **Precision 100.0% · Recall 97.8% · F1 98.9%** across 52 EN+VI samples (**11/11** decoys clean) |
+| **Regex Accuracy Eval** (`node scripts/eval-pii.ts`) | **Precision 100.0% · Recall 100.0% · F1 100.0%** across 52 EN+VI samples (**11/11** decoys clean) |
 | **Concurrency Stress Test** (`node scripts/stress-test.ts`) | **1,000 docs in 255 ms** (`0.255 ms/doc`) · **5,000 secrets** · **0 detected leaks** · **0 mismatches** |
 | **Bundle Discipline** (`npm run build`) | `index.js`: **171.52 kB** (`50.09 kB` gzip) · `nanoEntityDiscovery`: **3.89 kB** (`1.87 kB` gzip, lazy) · `pdfjs-dist`, `mammoth`, `tesseract.js`, `firestore` all strictly lazy-loaded |
 

@@ -101,11 +101,11 @@ const PII_RULES: PatternRule[] = [
     category: 'EMAIL',
     regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
   },
-  // Phone numbers (international & local, including +84 912-345-678; excludes dotted-quads like 999.999.999.999)
+  // Phone numbers (international & local, including +84 912-345-678 and VN landlines 028-3822-1234; excludes dotted-quads like 999.999.999.999)
   {
     category: 'PHONE',
     regex:
-      /(?<!\d\.)(?<!\d)(?:\+\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{3,4}(?!\.\d)(?!\d)|(?<!\d\.)\b0\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}(?!\.\d)(?!\d)/g,
+      /(?<!\d\.)(?<!\d)(?:\+\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{3,4}(?!\.\d)(?!\d)|(?<!\d\.)\b0\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}(?!\.\d)(?!\d)|(?<!\d\.)\b0\d{2}[\s.-]\d{4}[\s.-]\d{4}(?!\.\d)(?!\d)/g,
   },
   // Valid IPv4 (strict 0-255 octets, skips v1.2.3.4 and 1.2.3.4-rc1 versions)
   {

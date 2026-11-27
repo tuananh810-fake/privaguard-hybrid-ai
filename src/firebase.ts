@@ -53,12 +53,22 @@ export interface RemoteSettings {
   loadedFromServer: boolean;
 }
 
+const DEFAULT_CLOUD_MODEL = 'gemini-3.6-flash';
+
+function normalizeCloudModel(raw: string): string {
+  const model = raw.trim();
+  if (!model || /^gemini-(1\.|2\.0|2\.5)/i.test(model)) {
+    return DEFAULT_CLOUD_MODEL;
+  }
+  return model;
+}
+
 export async function loadRemoteSettings(): Promise<RemoteSettings> {
   try {
     const activated = await fetchAndActivate(remoteConfig);
     return {
       defaultInferenceMode: getString(remoteConfig, 'default_inference_mode') || 'PREFER_ON_DEVICE',
-      cloudModel: getString(remoteConfig, 'cloud_model') || 'gemini-3.6-flash',
+      cloudModel: normalizeCloudModel(getString(remoteConfig, 'cloud_model')),
       systemPromptStyle: getString(remoteConfig, 'system_prompt_style') || 'concise_executive',
       loadedFromServer: activated,
     };

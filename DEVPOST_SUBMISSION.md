@@ -35,7 +35,7 @@ PrivaGuard AI is a calm, Notion-style Hybrid AI workspace where **0 detected PII
 
 ## Accomplishments that we're proud of
 - **13/13 unit tests passing** (`node:test`), including Nano anti-hallucination filtering, unknown-token re-hydration auditing, prompt-injection defense, and `eng+vie` OCR bounding-box matching.
-- **Measured regex accuracy:** **100.0% Precision · 97.8% Recall · 98.9% F1** across 52 synthetic EN+VI samples with **11/11 decoy traps rejected** (`scripts/eval-pii.ts`).
+- **Measured regex accuracy:** **100.0% Precision · 100.0% Recall · 100.0% F1** across 52 synthetic EN+VI samples with **11/11 decoy traps rejected** (`scripts/eval-pii.ts`).
 - **High-throughput local vault:** 1,000 concurrent documents shielded and re-hydrated in **255 ms** (`0.255 ms/doc`, 5,000 secrets, 0 detected leaks, 0 mismatches).
 - **Lean bundle:** Initial JS stayed at **50.09 kB gzip** despite adding semantic Nano discovery, PDF/DOCX parsing, `eng+vie` OCR, and PWA offline support.
 

@@ -321,6 +321,8 @@ export default function App() {
     setRunning(false);
     setRawText(content);
     setFileMeta(null);
+    setAiDiscoveredEntities([]);
+    setRunMetrics(null);
     setResult(null);
     setStreamingText('');
     setFollowUps([]);
@@ -343,6 +345,8 @@ export default function App() {
       const parsed = await parseDocumentLocally(file);
       setRawText(parsed.text);
       setFileMeta(parsed.meta);
+      setAiDiscoveredEntities([]);
+      setRunMetrics(null);
       setResult(null);
       setStreamingText('');
       setFollowUps([]);
@@ -417,6 +421,7 @@ export default function App() {
     setRunning(true);
     setErrorMsg(null);
     setSavedNotice(null);
+    setRunMetrics(null);
     setResult(null);
     setStreamingText('');
     setFollowUps([]);
