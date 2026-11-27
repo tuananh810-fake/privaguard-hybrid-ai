@@ -186,17 +186,19 @@ async function runSingleStream(
   let ttftMs = 0;
 
   const model = getGenerativeModel(ai, {
-    model: cloudModel,
     mode: toInferenceMode(modeKey),
-    systemInstruction: getSystemInstruction(systemPromptStyle),
-    ...(useStructuredAudit && modeKey !== 'ONLY_ON_DEVICE'
-      ? {
-          generationConfig: {
-            responseMimeType: 'application/json',
-            responseSchema: SECURITY_AUDIT_SCHEMA,
-          },
-        }
-      : {}),
+    inCloudParams: {
+      model: cloudModel,
+      systemInstruction: getSystemInstruction(systemPromptStyle),
+      ...(useStructuredAudit && modeKey !== 'ONLY_ON_DEVICE'
+        ? {
+            generationConfig: {
+              responseMimeType: 'application/json',
+              responseSchema: SECURITY_AUDIT_SCHEMA,
+            },
+          }
+        : {}),
+    },
   });
 
   try {
@@ -249,9 +251,11 @@ async function runSingleStream(
       throw streamErr;
     }
     const fallbackModel = getGenerativeModel(ai, {
-      model: cloudModel,
       mode: toInferenceMode(modeKey),
-      systemInstruction: getSystemInstruction(systemPromptStyle),
+      inCloudParams: {
+        model: cloudModel,
+        systemInstruction: getSystemInstruction(systemPromptStyle),
+      },
     });
     const result = await fallbackModel.generateContent(parts);
     if (signal?.aborted) {
@@ -399,7 +403,6 @@ export async function generateFollowUpStream(
 
 export function createOnDeviceNanoModel() {
   return getGenerativeModel(ai, {
-    model: 'gemini-3.6-flash',
     mode: InferenceMode.ONLY_ON_DEVICE,
   });
 }
@@ -411,10 +414,7 @@ export async function detectEntitiesOnDevice(rawText: string): Promise<{
 }> {
   const started = performance.now();
   try {
-    const model = getGenerativeModel(ai, {
-      model: 'gemini-3.6-flash',
-      mode: InferenceMode.ONLY_ON_DEVICE,
-    });
+    const model = createOnDeviceNanoModel();
 
     const chunkSize = 1500;
     const overlap = 150;
