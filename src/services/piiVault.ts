@@ -1,6 +1,16 @@
+export type PiiCategory =
+  | 'SECRET'
+  | 'CARD'
+  | 'ID'
+  | 'EMAIL'
+  | 'PHONE'
+  | 'IP'
+  | 'PERSON'
+  | 'CUSTOM';
+
 export interface VaultEntry {
   token: string;
-  category: 'EMAIL' | 'PHONE' | 'SECRET' | 'ID' | 'CARD' | 'IP' | 'PERSON' | 'CUSTOM';
+  category: PiiCategory;
   original: string;
 }
 
@@ -8,10 +18,24 @@ export interface RedactionResult {
   redactedText: string;
   vault: VaultEntry[];
   bytesShielded: number;
+  leaksFound: number;
 }
 
+export type CategoryFilter = Record<PiiCategory, boolean>;
+
+export const DEFAULT_CATEGORY_FILTER: CategoryFilter = {
+  SECRET: true,
+  CARD: true,
+  ID: true,
+  EMAIL: true,
+  PHONE: true,
+  IP: true,
+  PERSON: true,
+  CUSTOM: true,
+};
+
 interface PatternRule {
-  category: VaultEntry['category'];
+  category: PiiCategory;
   regex: RegExp;
 }
 
@@ -48,13 +72,17 @@ const PII_RULES: PatternRule[] = [
   },
 ];
 
-export function redactLocally(rawText: string, extraSensitiveTerms: string[] = []): RedactionResult {
+export function redactLocally(
+  rawText: string,
+  extraSensitiveTerms: string[] = [],
+  enabledCategories: CategoryFilter = DEFAULT_CATEGORY_FILTER
+): RedactionResult {
   let redacted = rawText;
   const vault: VaultEntry[] = [];
   const seen = new Map<string, string>();
   const counters: Record<string, number> = {};
 
-  const registerToken = (original: string, category: VaultEntry['category']): string => {
+  const registerToken = (original: string, category: PiiCategory): string => {
     const trimmed = original.trim();
     if (!trimmed) return original;
     const existing = seen.get(trimmed);
@@ -66,28 +94,40 @@ export function redactLocally(rawText: string, extraSensitiveTerms: string[] = [
     return token;
   };
 
-  // 1. Apply deterministic regex rules first
   for (const rule of PII_RULES) {
+    if (!enabledCategories[rule.category]) continue;
     redacted = redacted.replace(rule.regex, (match) => registerToken(match, rule.category));
   }
 
-  // 2. Apply AI-discovered or user-specified sensitive terms (longest first)
-  const cleanExtras = extraSensitiveTerms
-    .map((t) => t.trim())
-    .filter((t) => t.length >= 3 && !t.startsWith('[') && !t.endsWith(']'))
-    .sort((a, b) => b.length - a.length);
+  if (enabledCategories.PERSON || enabledCategories.CUSTOM) {
+    const cleanExtras = extraSensitiveTerms
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 3 && !t.startsWith('[') && !t.endsWith(']'))
+      .sort((a, b) => b.length - a.length);
 
-  for (const term of cleanExtras) {
-    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const rgx = new RegExp(escaped, 'g');
-    if (rgx.test(redacted)) {
-      const token = registerToken(term, 'PERSON');
-      redacted = redacted.replace(rgx, token);
+    for (const term of cleanExtras) {
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rgx = new RegExp(escaped, 'g');
+      if (rgx.test(redacted)) {
+        const token = registerToken(term, 'PERSON');
+        redacted = redacted.replace(rgx, token);
+      }
     }
   }
 
   const bytesShielded = vault.reduce((acc, item) => acc + new Blob([item.original]).size, 0);
-  return { redactedText: redacted, vault, bytesShielded };
+  const leaksFound = verifyZeroLeak(redacted, vault);
+  return { redactedText: redacted, vault, bytesShielded, leaksFound };
+}
+
+export function verifyZeroLeak(payload: string, vault: VaultEntry[]): number {
+  let leaks = 0;
+  for (const entry of vault) {
+    if (entry.original.length >= 4 && payload.includes(entry.original)) {
+      leaks += 1;
+    }
+  }
+  return leaks;
 }
 
 export function rehydrateLocally(text: string, vault: VaultEntry[]): string {

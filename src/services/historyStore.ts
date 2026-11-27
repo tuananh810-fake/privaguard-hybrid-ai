@@ -1,6 +1,8 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
+  doc,
   limit,
   onSnapshot,
   orderBy,
@@ -16,6 +18,7 @@ export interface SavedAnalysis {
   inferenceSource: string;
   modelUsed: string;
   latencyMs: number;
+  ttftMs?: number;
   piiCount: number;
   bytesShielded: number;
   redactedPreview: string;
@@ -35,6 +38,10 @@ export async function saveAnonymizedAnalysis(
   return ref.id;
 }
 
+export async function deleteSavedAnalysis(id: string): Promise<void> {
+  await deleteDoc(doc(db, COLLECTION, id));
+}
+
 export function subscribeRecentAnalyses(
   onData: (items: SavedAnalysis[]) => void,
   onError?: (err: Error) => void
@@ -43,14 +50,15 @@ export function subscribeRecentAnalyses(
   return onSnapshot(
     q,
     (snap) => {
-      const items: SavedAnalysis[] = snap.docs.map((doc) => {
-        const d = doc.data();
+      const items: SavedAnalysis[] = snap.docs.map((dSnap) => {
+        const d = dSnap.data();
         return {
-          id: doc.id,
+          id: dSnap.id,
           task: String(d.task || 'executive'),
           inferenceSource: String(d.inferenceSource || 'UNKNOWN'),
           modelUsed: String(d.modelUsed || ''),
           latencyMs: Number(d.latencyMs || 0),
+          ttftMs: Number(d.ttftMs || 0),
           piiCount: Number(d.piiCount || 0),
           bytesShielded: Number(d.bytesShielded || 0),
           redactedPreview: String(d.redactedPreview || ''),
