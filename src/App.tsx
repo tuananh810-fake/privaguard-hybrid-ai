@@ -111,6 +111,10 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) {
+      themeMeta.setAttribute('content', theme === 'dark' ? '#191919' : '#ffffff');
+    }
     try {
       localStorage.setItem('privaguard_theme', theme);
     } catch {
@@ -583,7 +587,9 @@ export default function App() {
               {simulatedOffline
                 ? 'Offline · On-device'
                 : effectiveOnline
-                  ? 'Protected · Cloud'
+                  ? nanoStatus === 'available'
+                    ? 'Hybrid · Nano ready'
+                    : 'Protected · Cloud'
                   : 'Offline · On-device'}
             </span>
           </button>

@@ -36,6 +36,7 @@ const InteractiveTokenChip: React.FC<TokenChipProps> = memo(({ token, vaultLooku
   if (!entry) {
     return (
       <span
+        translate="no"
         className={`mx-0.5 inline-block rounded px-1.5 py-0.5 font-mono text-[12px] font-medium ${tokenStyle(token)}`}
       >
         {token}
@@ -46,6 +47,7 @@ const InteractiveTokenChip: React.FC<TokenChipProps> = memo(({ token, vaultLooku
   return (
     <button
       type="button"
+      translate="no"
       onClick={() => setPeek((v) => !v)}
       title={peek ? 'Click to hide again' : 'Click to peek original value locally'}
       className={`mx-0.5 inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[12px] font-medium transition ${

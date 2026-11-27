@@ -35,7 +35,15 @@ export const HistoryStrip: React.FC<HistoryStripProps> = memo(
           {history.map((item) => (
             <div
               key={item.id}
+              role="button"
+              tabIndex={0}
               onClick={() => onSelect(item)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(item);
+                }
+              }}
               className="group relative cursor-pointer rounded-lg border border-[var(--n-border)] bg-[var(--n-bg)] p-3 transition hover:bg-[var(--n-hover)]"
             >
               <button

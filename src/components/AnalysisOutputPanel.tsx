@@ -89,7 +89,7 @@ const StructuredAuditView: React.FC<{
               {report.riskLevel.charAt(0) + report.riskLevel.slice(1).toLowerCase()}
             </span>
           </div>
-          <span className="font-mono text-[12.5px] text-[var(--n-muted)]">
+          <span className="font-mono text-[12.5px] tabular-nums text-[var(--n-muted)]">
             Score {report.riskScore}/100
           </span>
         </div>
@@ -151,7 +151,7 @@ const StructuredAuditView: React.FC<{
           <h3 className="text-[16px] font-semibold tracking-tight text-[var(--n-text)]">
             Recommended next steps
           </h3>
-          <span className="font-mono text-[12px] text-[var(--n-muted)]">
+          <span className="font-mono text-[12px] tabular-nums text-[var(--n-muted)]">
             {completedCount}/{report.remediations.length} done
           </span>
         </div>
@@ -184,6 +184,47 @@ const StructuredAuditView: React.FC<{
 });
 
 StructuredAuditView.displayName = 'StructuredAuditView';
+
+const FollowUpThread: React.FC<{
+  followUps: FollowUpMessage[];
+  followUpStreaming: string;
+  rehydrate: boolean;
+  vault: VaultEntry[];
+  vaultLookup: Record<string, VaultEntry>;
+}> = memo(({ followUps, followUpStreaming, rehydrate, vault, vaultLookup }) => {
+  if (followUps.length === 0 && !followUpStreaming) return null;
+
+  return (
+    <div className="mt-8 space-y-4 border-t border-[var(--n-border)] pt-6">
+      {followUps.map((msg) => {
+        const text = rehydrate ? rehydrateLocally(msg.text, vault) : msg.text;
+        return (
+          <div key={msg.id}>
+            {msg.role === 'user' ? (
+              <p className="rounded-lg bg-[var(--n-surface)] px-3.5 py-2.5 text-[14px] font-medium text-[var(--n-text)]">
+                {text}
+              </p>
+            ) : (
+              <div className="pl-1">
+                <RichOutput markdown={text} vaultLookup={vaultLookup} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {followUpStreaming && (
+        <div className="pl-1">
+          <RichOutput
+            markdown={rehydrate ? rehydrateLocally(followUpStreaming, vault) : followUpStreaming}
+            vaultLookup={vaultLookup}
+          />
+        </div>
+      )}
+    </div>
+  );
+});
+
+FollowUpThread.displayName = 'FollowUpThread';
 
 export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
   ({
@@ -241,7 +282,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                 )}
                 {result.inferenceSource === 'ON_DEVICE' ? 'On-device Nano' : 'Cloud Gemini'}
               </span>
-              <span className="font-mono">
+              <span className="font-mono tabular-nums">
                 Shield {shieldTimeMs < 1 ? '<1ms' : `${shieldTimeMs}ms`} · AI {result.latencyMs}ms
               </span>
               {result.cached && (
@@ -260,7 +301,10 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
 
         {/* Error Callout */}
         {errorMsg && (
-          <div className="mb-4 rounded-lg border border-[var(--n-danger-border)] bg-[var(--n-danger-soft)] p-3.5 text-[13.5px] text-[var(--n-danger)]">
+          <div
+            role="alert"
+            className="mb-4 rounded-lg border border-[var(--n-danger-border)] bg-[var(--n-danger-soft)] p-3.5 text-[13.5px] text-[var(--n-danger)]"
+          >
             <div className="mb-1 flex items-center gap-1.5 font-semibold">
               <FileWarning className="h-4 w-4" />
               Something went wrong
@@ -303,37 +347,13 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                 vault={vault}
                 vaultLookup={vaultLookup}
               />
-
-              {(followUps.length > 0 || followUpStreaming) && (
-                <div className="mt-8 space-y-4 border-t border-[var(--n-border)] pt-6">
-                  {followUps.map((msg) => {
-                    const text = rehydrate ? rehydrateLocally(msg.text, vault) : msg.text;
-                    return (
-                      <div key={msg.id}>
-                        {msg.role === 'user' ? (
-                          <p className="rounded-lg bg-[var(--n-surface)] px-3.5 py-2.5 text-[14px] font-medium text-[var(--n-text)]">
-                            {text}
-                          </p>
-                        ) : (
-                          <div className="pl-1">
-                            <RichOutput markdown={text} vaultLookup={vaultLookup} />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {followUpStreaming && (
-                    <div className="pl-1">
-                      <RichOutput
-                        markdown={
-                          rehydrate ? rehydrateLocally(followUpStreaming, vault) : followUpStreaming
-                        }
-                        vaultLookup={vaultLookup}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
+              <FollowUpThread
+                followUps={followUps}
+                followUpStreaming={followUpStreaming}
+                rehydrate={rehydrate}
+                vault={vault}
+                vaultLookup={vaultLookup}
+              />
             </>
           ) : displayedMarkdown ? (
             <>
@@ -341,37 +361,13 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
               {running && (
                 <span className="mt-2 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-[var(--n-accent)]" />
               )}
-
-              {(followUps.length > 0 || followUpStreaming) && (
-                <div className="mt-8 space-y-4 border-t border-[var(--n-border)] pt-6">
-                  {followUps.map((msg) => {
-                    const text = rehydrate ? rehydrateLocally(msg.text, vault) : msg.text;
-                    return (
-                      <div key={msg.id}>
-                        {msg.role === 'user' ? (
-                          <p className="rounded-lg bg-[var(--n-surface)] px-3.5 py-2.5 text-[14px] font-medium text-[var(--n-text)]">
-                            {text}
-                          </p>
-                        ) : (
-                          <div className="pl-1">
-                            <RichOutput markdown={text} vaultLookup={vaultLookup} />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {followUpStreaming && (
-                    <div className="pl-1">
-                      <RichOutput
-                        markdown={
-                          rehydrate ? rehydrateLocally(followUpStreaming, vault) : followUpStreaming
-                        }
-                        vaultLookup={vaultLookup}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
+              <FollowUpThread
+                followUps={followUps}
+                followUpStreaming={followUpStreaming}
+                rehydrate={rehydrate}
+                vault={vault}
+                vaultLookup={vaultLookup}
+              />
             </>
           ) : running ? (
             <div className="flex h-full min-h-[280px] flex-col items-center justify-center gap-2.5 text-center">
@@ -407,7 +403,10 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
         {result && (
           <div className="mt-5 space-y-3 border-t border-[var(--n-border)] pt-4">
             {savedNotice && (
-              <div className="flex items-center gap-1.5 text-[12.5px] text-[var(--n-accent)]">
+              <div
+                aria-live="polite"
+                className="flex items-center gap-1.5 text-[12.5px] text-[var(--n-accent)]"
+              >
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 {savedNotice}
               </div>

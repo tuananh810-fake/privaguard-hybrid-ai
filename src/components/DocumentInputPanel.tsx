@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Code2,
@@ -115,7 +115,26 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
   }) => {
     const textFileRef = useRef<HTMLInputElement>(null);
     const imageFileRef = useRef<HTMLInputElement>(null);
+    const attachMenuRef = useRef<HTMLDivElement>(null);
     const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+
+    useEffect(() => {
+      if (!attachMenuOpen) return;
+      const onPointerDown = (e: MouseEvent) => {
+        if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
+          setAttachMenuOpen(false);
+        }
+      };
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') setAttachMenuOpen(false);
+      };
+      document.addEventListener('mousedown', onPointerDown);
+      window.addEventListener('keydown', onKeyDown);
+      return () => {
+        document.removeEventListener('mousedown', onPointerDown);
+        window.removeEventListener('keydown', onKeyDown);
+      };
+    }, [attachMenuOpen]);
 
     return (
       <section className="flex min-h-[calc(100vh-49px)] flex-col bg-[var(--n-bg)] px-6 py-7 sm:px-10 lg:border-r lg:border-[var(--n-border)]">
@@ -254,6 +273,8 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                 <img
                   src={attachedImage.previewUrl}
                   alt={attachedImage.name}
+                  width={32}
+                  height={32}
                   className="h-8 w-8 shrink-0 rounded object-cover"
                 />
                 <div className="min-w-0">
@@ -306,9 +327,11 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
             />
 
             {/* Single + Attach Menu */}
-            <div className="relative">
+            <div ref={attachMenuRef} className="relative">
               <button
                 type="button"
+                aria-expanded={attachMenuOpen}
+                aria-haspopup="menu"
                 onClick={() => setAttachMenuOpen((v) => !v)}
                 className="inline-flex items-center gap-1.5 rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)]"
               >
@@ -316,9 +339,13 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                 Attach
               </button>
               {attachMenuOpen && (
-                <div className="absolute bottom-full left-0 z-20 mb-1.5 w-44 rounded-lg border border-[var(--n-border)] bg-[var(--n-bg)] p-1">
+                <div
+                  role="menu"
+                  className="absolute bottom-full left-0 z-20 mb-1.5 w-44 rounded-lg border border-[var(--n-border)] bg-[var(--n-bg)] p-1"
+                >
                   <button
                     type="button"
+                    role="menuitem"
                     onClick={() => {
                       setAttachMenuOpen(false);
                       textFileRef.current?.click();
@@ -330,6 +357,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                   </button>
                   <button
                     type="button"
+                    role="menuitem"
                     onClick={() => {
                       setAttachMenuOpen(false);
                       imageFileRef.current?.click();

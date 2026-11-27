@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
   --n-bg: #ffffff;
   --n-surface: #f7f7f5;
   --n-hover: #efefee;
@@ -24,6 +25,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --n-bg: #191919;
   --n-surface: #202020;
   --n-hover: #2c2c2c;

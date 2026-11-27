@@ -68,7 +68,7 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
         onClick={onClose}
       >
         <aside
-          className="flex h-full w-full max-w-md flex-col border-l border-[var(--n-border)] bg-[var(--n-bg)]"
+          className="flex h-full w-full max-w-md flex-col overscroll-contain border-l border-[var(--n-border)] bg-[var(--n-bg)]"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Slide-over Header */}
