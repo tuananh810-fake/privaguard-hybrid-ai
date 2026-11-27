@@ -19,7 +19,9 @@ import {
   RefreshCw,
   Shield,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
+  Square,
   Trash2,
   Upload,
   Wifi,
@@ -35,7 +37,7 @@ import {
   PiiCategory,
   redactLocally,
   rehydrateLocally,
-  VaultEntry,
+  verifyZeroLeak,
 } from './services/piiVault';
 import {
   AnalysisTask,
@@ -58,14 +60,14 @@ import { HighlightedRedactedText, RichOutput } from './components/RichOutput';
 import { ImageRedactorModal } from './components/ImageRedactorModal';
 
 const MODE_OPTIONS: { key: ModeKey; label: string; desc: string }[] = [
-  { key: 'PREFER_ON_DEVICE', label: 'Prefer On-Device', desc: 'Gemini Nano first → Cloud fallback' },
-  { key: 'ONLY_ON_DEVICE', label: 'Only On-Device', desc: 'Strict offline / zero cloud' },
-  { key: 'PREFER_IN_CLOUD', label: 'Prefer Cloud', desc: 'Gemini Cloud → Nano fallback' },
-  { key: 'ONLY_IN_CLOUD', label: 'Only Cloud', desc: 'Always Gemini Cloud' },
+  { key: 'PREFER_ON_DEVICE', label: 'Auto Hybrid (Recommended)', desc: 'On-Device Nano first → Cloud fallback' },
+  { key: 'PREFER_IN_CLOUD', label: 'Fast Cloud', desc: 'Gemini Cloud → Nano fallback' },
+  { key: 'ONLY_ON_DEVICE', label: 'Strict Offline', desc: '100% On-Device only (zero network)' },
+  { key: 'ONLY_IN_CLOUD', label: 'Cloud Only', desc: 'Always Gemini Cloud' },
 ];
 
 const TASK_OPTIONS: { key: AnalysisTask; label: string }[] = [
-  { key: 'risk_audit', label: 'Security & Legal Audit' },
+  { key: 'risk_audit', label: 'Security Audit' },
   { key: 'executive', label: 'Executive Brief' },
   { key: 'action_plan', label: 'Action Plan' },
   { key: 'quick_offline', label: 'Quick Summary' },
@@ -73,8 +75,8 @@ const TASK_OPTIONS: { key: AnalysisTask; label: string }[] = [
 
 const CATEGORY_LABELS: { key: PiiCategory; label: string }[] = [
   { key: 'SECRET', label: 'API Keys' },
-  { key: 'CARD', label: 'Cards/IBAN' },
-  { key: 'ID', label: 'SSN/IDs' },
+  { key: 'CARD', label: 'Cards / IBAN' },
+  { key: 'ID', label: 'SSN / IDs' },
   { key: 'EMAIL', label: 'Emails' },
   { key: 'PHONE', label: 'Phones' },
   { key: 'IP', label: 'IPs' },
@@ -88,8 +90,11 @@ export default function App() {
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
   const [imageMaskCount, setImageMaskCount] = useState(0);
   const [showImageRedactor, setShowImageRedactor] = useState(false);
+
   const [mode, setMode] = useState<ModeKey>('PREFER_ON_DEVICE');
   const [task, setTask] = useState<AnalysisTask>('risk_audit');
+  const [inputTab, setInputTab] = useState<'original' | 'safe' | 'audit'>('original');
+  const [showTechDrawer, setShowTechDrawer] = useState(false);
 
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [nanoStatus, setNanoStatus] = useState<NanoAvailability>('unavailable');
@@ -100,16 +105,13 @@ export default function App() {
     loadedFromServer: false,
   });
 
-  const [activeStage, setActiveStage] = useState<0 | 1 | 2 | 3>(0);
   const [aiDiscoveredEntities, setAiDiscoveredEntities] = useState<string[]>([]);
-  const [stage1Meta, setStage1Meta] = useState<{ usedOnDeviceAI: boolean; latencyMs: number } | null>(null);
   const [streamingText, setStreamingText] = useState('');
   const [result, setResult] = useState<HybridResponse | null>(null);
   const [rehydrate, setRehydrate] = useState(false);
   const [running, setRunning] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [showPayloadInspector, setShowPayloadInspector] = useState(false);
 
   const [showDebugModal, setShowDebugModal] = useState(false);
   const [debugTokenInput, setDebugTokenInput] = useState(
@@ -123,6 +125,8 @@ export default function App() {
 
   const textFileRef = useRef<HTMLInputElement>(null);
   const imageFileRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
   const isLocalhost =
     typeof window !== 'undefined' &&
     (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
@@ -158,6 +162,7 @@ export default function App() {
     );
 
     return () => {
+      abortRef.current?.abort();
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
       unsub();
@@ -177,6 +182,11 @@ export default function App() {
     [rawText, extraTerms, categories]
   );
 
+  const leakCheck = useMemo(
+    () => verifyZeroLeak(redaction.redactedText, redaction.vault),
+    [redaction]
+  );
+
   const outgoingPrompt = useMemo(
     () => buildTaskPrompt(redaction.redactedText, task, Boolean(attachedImage)),
     [redaction.redactedText, task, attachedImage]
@@ -188,15 +198,23 @@ export default function App() {
     return rehydrate ? rehydrateLocally(src, redaction.vault) : src;
   }, [result, streamingText, rehydrate, redaction.vault]);
 
+  function handleStop() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setRunning(false);
+  }
+
   function handleTextFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
+      abortRef.current?.abort();
       setRawText(String(reader.result || ''));
       setResult(null);
       setStreamingText('');
       setErrorMsg(null);
+      setInputTab('original');
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -224,45 +242,63 @@ export default function App() {
 
   async function handleRunPipeline() {
     if (!rawText.trim()) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setRunning(true);
     setErrorMsg(null);
     setSavedNotice(null);
     setResult(null);
     setStreamingText('');
-    setActiveStage(1);
 
     try {
-      // Stage 1: On-Device Gemini Nano entity detection (strictly local, zero cloud leak)
-      const localScan = await detectEntitiesOnDevice(rawText);
-      setAiDiscoveredEntities(localScan.entities);
-      setStage1Meta({ usedOnDeviceAI: localScan.usedOnDeviceAI, latencyMs: localScan.latencyMs });
+      const effectiveMode: ModeKey = !isOnline ? 'ONLY_ON_DEVICE' : mode;
+
+      // Only invoke On-Device Nano entity scan when Nano is genuinely available
+      // (eliminates ~1.1s dead wait on browsers without local Nano weights).
+      let discovered: string[] = [];
+      if (
+        nanoStatus === 'available' &&
+        (effectiveMode === 'PREFER_ON_DEVICE' || effectiveMode === 'ONLY_ON_DEVICE')
+      ) {
+        const localScan = await detectEntitiesOnDevice(rawText);
+        if (controller.signal.aborted) return;
+        discovered = localScan.entities;
+        setAiDiscoveredEntities(discovered);
+      }
 
       const manual = customTerms
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
-      const merged = Array.from(new Set([...manual, ...localScan.entities]));
+      const merged = Array.from(new Set([...manual, ...discovered]));
       const finalRedaction = redactLocally(rawText, merged, categories);
 
-      // Stage 2: Streaming Hybrid AI Analysis on ONLY the anonymized payload
-      setActiveStage(2);
-      const effectiveMode: ModeKey = !isOnline ? 'ONLY_ON_DEVICE' : mode;
       const prompt = buildTaskPrompt(finalRedaction.redactedText, task, Boolean(attachedImage));
       const aiRes = await generateHybridStream(
         prompt,
         effectiveMode,
         remoteSettings.cloudModel,
         attachedImage,
-        (partial) => setStreamingText(partial)
+        (partial) => {
+          if (!controller.signal.aborted) setStreamingText(partial);
+        },
+        controller.signal
       );
-      setResult(aiRes);
-      setActiveStage(3);
+
+      if (!controller.signal.aborted) {
+        setResult(aiRes);
+      }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : String(err);
       setErrorMsg(msg);
-      setActiveStage(0);
     } finally {
-      setRunning(false);
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setRunning(false);
+      }
     }
   }
 
@@ -298,9 +334,9 @@ export default function App() {
         piiCount: redaction.vault.length,
         bytesShielded: redaction.bytesShielded,
         redactedPreview: redaction.redactedText.slice(0, 180),
-        analysisText: result.text, // strictly anonymized — NEVER saves raw PII
+        analysisText: result.text,
       });
-      setSavedNotice('Synced anonymized report to Cloud Firestore (0 raw PII stored).');
+      setSavedNotice('Saved anonymized report to Cloud Firestore (0 raw PII stored).');
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
@@ -319,202 +355,219 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100">
-      {/* Top Bar */}
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      {/* Clean Minimal Header */}
       <header className="sticky top-0 z-20 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3.5">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/15 ring-1 ring-emerald-500/40">
-              <ShieldCheck className="h-6 w-6 text-emerald-400" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 ring-1 ring-emerald-500/40">
+              <ShieldCheck className="h-5 w-5 text-emerald-400" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold tracking-tight text-white">PrivaGuard AI</h1>
-                <span className="rounded-full bg-indigo-500/20 px-2 py-0.5 text-[11px] font-semibold text-indigo-300 ring-1 ring-indigo-500/40">
-                  #BuildHybridAI 2026
-                </span>
+                <h1 className="text-base font-bold tracking-tight text-white">PrivaGuard AI</h1>
                 <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-500/30">
-                  v2.1
+                  v3.0
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Zero-Leak On-Device PII Shield + Streaming Firebase AI Logic
+                Analyze private docs with AI — secrets stay 100% on your device
               </p>
             </div>
           </div>
 
-          {/* Live Status Pills */}
-          <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex items-center gap-2.5">
             <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-medium ring-1 ${
-                nanoStatus === 'available'
-                  ? 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/40'
-                  : 'bg-amber-500/15 text-amber-300 ring-amber-500/40'
-              }`}
-            >
-              <Cpu className="h-3.5 w-3.5" />
-              Gemini Nano: {nanoStatus === 'available' ? 'On-Device Ready' : 'Cloud Fallback'}
-            </span>
-
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-medium ring-1 ${
+              className={`hidden items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ring-1 sm:inline-flex ${
                 isOnline
-                  ? 'bg-sky-500/15 text-sky-300 ring-sky-500/40'
-                  : 'bg-rose-500/15 text-rose-300 ring-rose-500/40'
+                  ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/30'
+                  : 'bg-amber-500/10 text-amber-300 ring-amber-500/30'
               }`}
             >
               {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-              {isOnline ? 'Online' : 'Offline Mode'}
+              {isOnline
+                ? nanoStatus === 'available'
+                  ? 'Hybrid Ready'
+                  : 'Protected · Cloud Ready'
+                : 'Offline · On-Device'}
             </span>
 
             <button
-              onClick={() => isLocalhost && setShowDebugModal(true)}
-              title={isLocalhost ? 'Click to set localhost App Check Debug Token' : 'App Check Enforced via Fraud Defense'}
-              className="inline-flex items-center gap-1.5 rounded-full bg-slate-800/90 px-3 py-1 font-medium text-slate-300 ring-1 ring-slate-700 transition hover:ring-emerald-500/50"
+              onClick={() => setShowTechDrawer((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                showTechDrawer
+                  ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200'
+                  : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500 hover:text-white'
+              }`}
             >
-              <Lock className="h-3.5 w-3.5 text-emerald-400" />
-              App Check Enforced
-              {isLocalhost && <KeyRound className="h-3 w-3 text-amber-400" />}
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Privacy &amp; Tech
             </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-5 px-4 py-5">
-        {/* Visual 3-Stage Hybrid Pipeline Stepper + Zero-Leak Proof */}
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {[
-            {
-              step: 1,
-              title: 'Stage 1 · Local PII Shield',
-              sub: `${redaction.vault.length} secrets shielded · ${redaction.bytesShielded}B kept in RAM`,
-              icon: Shield,
-            },
-            {
-              step: 2,
-              title: 'Stage 2 · Firebase AI Logic',
-              sub: result
-                ? `${result.inferenceSource} · TTFT ${result.ttftMs}ms · Total ${result.latencyMs}ms`
-                : `Mode: ${mode} (${remoteSettings.cloudModel})`,
-              icon: Sparkles,
-            },
-            {
-              step: 3,
-              title: 'Stage 3 · Local Re-hydration',
-              sub:
-                redaction.leaksFound === 0
-                  ? 'Zero-Leak Verified (0 raw PII in outgoing payload)'
-                  : `${redaction.leaksFound} potential leaks detected`,
-              icon: CheckCircle2,
-            },
-          ].map(({ step, title, sub, icon: Icon }) => {
-            const done = activeStage > step || (step === 3 && activeStage === 3);
-            const active = activeStage === step && running;
-            return (
-              <div
-                key={step}
-                className={`flex items-center gap-3 rounded-2xl border p-3.5 transition ${
-                  active
-                    ? 'border-emerald-400/70 bg-emerald-500/10 shadow-lg shadow-emerald-500/10'
-                    : done
-                      ? 'border-emerald-500/35 bg-slate-900/80'
-                      : 'border-slate-800 bg-slate-900/60'
-                }`}
+      <main className="mx-auto max-w-6xl space-y-5 px-5 py-6">
+        {/* Collapsible Privacy & Tech Inspector (Hidden by default for clean UX; 1-click for judges/power users) */}
+        {showTechDrawer && (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-emerald-400" />
+                <h2 className="text-sm font-semibold text-white">
+                  Privacy Shield Settings &amp; Firebase Hybrid Telemetry
+                </h2>
+                <span className="rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10px] font-semibold text-indigo-300">
+                  #BuildHybridAI 2026
+                </span>
+              </div>
+              <button
+                onClick={() => setShowTechDrawer(false)}
+                className="text-slate-400 hover:text-white"
+                aria-label="Close privacy and tech settings"
               >
-                <div
-                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1 ${
-                    active || done
-                      ? 'bg-emerald-500/20 text-emerald-300 ring-emerald-500/40'
-                      : 'bg-slate-800 text-slate-400 ring-slate-700'
-                  }`}
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              {/* Inference Mode & Remote Config */}
+              <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3.5">
+                <label className="block text-xs font-semibold text-slate-200">
+                  Hybrid Inference Mode
+                </label>
+                <select
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value as ModeKey)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-emerald-500"
                 >
-                  <Icon className={`h-4 w-4 ${active ? 'animate-pulse' : ''}`} />
+                  {MODE_OPTIONS.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                  <span className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-2 py-1 text-slate-300 ring-1 ring-slate-700">
+                    <Cpu className="h-3 w-3 text-amber-400" />
+                    Nano: {nanoStatus}
+                  </span>
+                  <button
+                    onClick={() => isLocalhost && setShowDebugModal(true)}
+                    className={`inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-emerald-300 ring-1 ring-emerald-500/30 ${
+                      isLocalhost ? 'cursor-pointer hover:bg-emerald-500/20' : 'cursor-default'
+                    }`}
+                  >
+                    <Lock className="h-3 w-3" />
+                    App Check Enforced
+                    {isLocalhost && <KeyRound className="h-3 w-3 text-amber-300" />}
+                  </button>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-white">{title}</p>
-                  <p className="truncate text-[11px] text-slate-400">{sub}</p>
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>
+                    Remote Config: <code className="text-emerald-300">{remoteSettings.cloudModel}</code>
+                  </span>
+                  <button
+                    onClick={refreshRemoteConfig}
+                    title="Refresh Remote Config"
+                    className="rounded p-1 hover:bg-slate-800 hover:text-emerald-300"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               </div>
-            );
-          })}
-        </section>
 
-        {/* Sample Presets + Category Shield Filters */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-xl space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                1-Click Samples:
-              </span>
-              {SAMPLE_DOCUMENTS.map((doc) => (
-                <button
-                  key={doc.id}
-                  onClick={() => {
-                    setRawText(doc.content);
-                    setResult(null);
-                    setStreamingText('');
-                    setErrorMsg(null);
-                    setActiveStage(0);
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-500/60 hover:bg-slate-800"
-                >
-                  <FileWarning className="h-3.5 w-3.5 text-amber-400" />
-                  {doc.label}
-                  <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300">
-                    {doc.badge}
+              {/* Shield Rules & Custom Terms */}
+              <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3.5">
+                <div className="text-xs font-semibold text-slate-200">Auto-Redaction Rules</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {CATEGORY_LABELS.map((cat) => {
+                    const active = categories[cat.key];
+                    return (
+                      <button
+                        key={cat.key}
+                        onClick={() =>
+                          setCategories((prev) => ({ ...prev, [cat.key]: !prev[cat.key] }))
+                        }
+                        className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                          active
+                            ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/40'
+                            : 'bg-slate-900 text-slate-500 ring-1 ring-slate-800 hover:text-slate-300'
+                        }`}
+                      >
+                        {active ? '✓ ' : '+ '}
+                        {cat.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] text-slate-400">
+                    Extra private names / words:
+                  </label>
+                  <input
+                    type="text"
+                    value={customTerms}
+                    onChange={(e) => setCustomTerms(e.target.value)}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Local RAM Vault Preview */}
+              <div className="flex flex-col rounded-xl border border-slate-800 bg-slate-950/70 p-3.5">
+                <div className="mb-2 flex items-center justify-between text-xs font-semibold text-slate-200">
+                  <span>Local RAM Vault</span>
+                  <span className="font-mono text-[11px] text-emerald-400">
+                    {redaction.vault.length} shielded · {redaction.bytesShielded}B
                   </span>
-                </button>
-              ))}
+                </div>
+                <div className="max-h-32 space-y-1 overflow-y-auto font-mono text-[11px]">
+                  {redaction.vault.length === 0 ? (
+                    <p className="text-slate-500">No sensitive patterns detected.</p>
+                  ) : (
+                    redaction.vault.map((entry) => (
+                      <div
+                        key={entry.token}
+                        className="flex items-center justify-between gap-2 rounded bg-slate-900 px-2 py-1"
+                      >
+                        <span className="font-semibold text-emerald-400">{entry.token}</span>
+                        <span className="truncate text-slate-400">{entry.original}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
+          </section>
+        )}
 
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <span>
-                Remote Config:{' '}
-                <code className="rounded bg-slate-800 px-1.5 py-0.5 text-emerald-300">
-                  {remoteSettings.cloudModel}
-                </code>
-              </span>
-              <button
-                onClick={refreshRemoteConfig}
-                title="Refresh Firebase Remote Config"
-                className="rounded-md border border-slate-700 bg-slate-800 p-1 text-slate-300 hover:border-emerald-500/50 hover:text-white"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
+        {/* Main 2-Column Human-First Workspace */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+          {/* Left Column (5 cols): Document Input + Built-in Safe Preview */}
+          <section className="flex flex-col rounded-2xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl lg:col-span-5">
+            {/* Quick Samples & Upload Bar */}
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {SAMPLE_DOCUMENTS.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => {
+                      abortRef.current?.abort();
+                      setRunning(false);
+                      setRawText(s.content);
+                      setResult(null);
+                      setStreamingText('');
+                      setErrorMsg(null);
+                      setSavedNotice(null);
+                    }}
+                    className="rounded-lg border border-slate-700/80 bg-slate-950/80 px-2.5 py-1 text-xs text-slate-300 transition hover:border-emerald-500/60 hover:text-white"
+                  >
+                    {s.label.replace(' Incident Log', ' Log').replace(' Patient Note', ' Note').replace(' & Payout', '')}
+                  </button>
+                ))}
+              </div>
 
-          {/* PII Category Toggles */}
-          <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-800/80 pt-3">
-            <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              Shield Rules:
-            </span>
-            {CATEGORY_LABELS.map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => setCategories((prev) => ({ ...prev, [key]: !prev[key] }))}
-                className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition ring-1 ${
-                  categories[key]
-                    ? 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/40'
-                    : 'bg-slate-800/60 text-slate-500 ring-slate-700 hover:text-slate-300'
-                }`}
-              >
-                {categories[key] ? '✓ ' : ''}
-                {label}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* 3-Column Hybrid Workspace */}
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-          {/* Column 1: Raw Private Input + File/Image Upload */}
-          <section className="flex flex-col rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-xl">
-            <div className="mb-2.5 flex items-center justify-between gap-2">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
-                <Lock className="h-4 w-4 text-rose-400" />
-                1. Raw Private Input
-              </h2>
               <div className="flex items-center gap-1.5">
                 <input
                   ref={textFileRef}
@@ -532,54 +585,114 @@ export default function App() {
                 />
                 <button
                   onClick={() => textFileRef.current?.click()}
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-slate-300 hover:border-emerald-500/50 hover:text-white"
+                  title="Upload text/log file"
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs text-slate-300 hover:border-emerald-500/50 hover:text-white"
                 >
-                  <Upload className="h-3 w-3" />
+                  <Upload className="h-3.5 w-3.5" />
                   File
                 </button>
                 <button
                   onClick={() => imageFileRef.current?.click()}
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-slate-300 hover:border-indigo-500/50 hover:text-white"
+                  title="Upload and mask image locally"
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs text-slate-300 hover:border-indigo-500/50 hover:text-white"
                 >
-                  <ImageIcon className="h-3 w-3" />
+                  <ImageIcon className="h-3.5 w-3.5" />
                   Image
                 </button>
               </div>
             </div>
 
-            <textarea
-              value={rawText}
-              onChange={(e) => setRawText(e.target.value)}
-              rows={9}
-              placeholder="Paste confidential notes, contracts, medical records, or upload a log/image..."
-              className="w-full flex-1 resize-none rounded-xl border border-slate-700 bg-slate-950/90 p-3 font-mono text-xs leading-relaxed text-slate-200 outline-none focus:border-emerald-500"
-            />
+            {/* Clean Mode Tabs: Original | Safe Preview | Audit */}
+            <div className="mb-2.5 flex items-center justify-between gap-2">
+              <div className="inline-flex rounded-lg bg-slate-950 p-0.5 ring-1 ring-slate-800">
+                <button
+                  onClick={() => setInputTab('original')}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                    inputTab === 'original'
+                      ? 'bg-slate-800 text-white'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Your Document
+                </button>
+                <button
+                  onClick={() => setInputTab('safe')}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                    inputTab === 'safe'
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Masked ({redaction.vault.length})
+                </button>
+                <button
+                  onClick={() => setInputTab('audit')}
+                  className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                    inputTab === 'audit'
+                      ? 'bg-indigo-500/20 text-indigo-300'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Code2 className="h-3.5 w-3.5" />
+                  Audit
+                </button>
+              </div>
 
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {leakCheck === 0 ? '0 leaks' : `${leakCheck} leaks`}
+              </span>
+            </div>
+
+            {/* Editor / Safe Preview / Outgoing Prompt Audit */}
+            {inputTab === 'original' ? (
+              <textarea
+                value={rawText}
+                onChange={(e) => setRawText(e.target.value)}
+                rows={11}
+                placeholder="Paste any confidential log, contract, medical note, or upload a file/image..."
+                className="w-full flex-1 resize-none rounded-xl border border-slate-700/80 bg-slate-950 p-3.5 font-mono text-xs leading-relaxed text-slate-200 outline-none focus:border-emerald-500"
+              />
+            ) : inputTab === 'safe' ? (
+              <div className="min-h-[236px] flex-1 overflow-y-auto rounded-xl border border-emerald-500/30 bg-slate-950 p-3.5 font-mono text-xs leading-relaxed text-emerald-100">
+                <HighlightedRedactedText text={redaction.redactedText} />
+              </div>
+            ) : (
+              <div className="min-h-[236px] flex-1 overflow-y-auto rounded-xl border border-indigo-500/30 bg-slate-950 p-3.5 font-mono text-[11px] leading-relaxed text-indigo-200">
+                <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-indigo-400">
+                  Exact Network Payload Sent to AI (Zero Raw PII):
+                </div>
+                <pre className="whitespace-pre-wrap">{outgoingPrompt}</pre>
+              </div>
+            )}
+
+            {/* Attached Image Card with Local Canvas Redactor */}
             {attachedImage && (
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-xs">
-                <div className="flex min-w-0 items-center gap-2">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs">
+                <div className="flex min-w-0 items-center gap-2.5">
                   <img
                     src={attachedImage.previewUrl}
                     alt={attachedImage.name}
-                    className="h-7 w-7 shrink-0 rounded object-cover"
+                    className="h-8 w-8 shrink-0 rounded object-cover"
                   />
                   <div className="min-w-0">
-                    <div className="truncate text-indigo-200">{attachedImage.name}</div>
+                    <div className="truncate font-medium text-indigo-200">{attachedImage.name}</div>
                     <div
-                      className={`text-[10px] ${
+                      className={`text-[11px] ${
                         imageMaskCount > 0 ? 'text-emerald-300' : 'text-amber-300'
                       }`}
                     >
                       {imageMaskCount > 0
                         ? `Locally Masked (${imageMaskCount} bar${imageMaskCount > 1 ? 's' : ''})`
-                        : 'Unmasked — click Redact to blur/hide private regions'}
+                        : 'Unmasked — click Redact to hide private regions'}
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => setShowImageRedactor(true)}
-                    className="rounded-md bg-emerald-500/20 px-2 py-1 text-[11px] font-medium text-emerald-300 ring-1 ring-emerald-500/40 hover:bg-emerald-500/30"
+                    className="rounded-lg bg-emerald-500/20 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-500/40 hover:bg-emerald-500/30"
                   >
                     Redact Image
                   </button>
@@ -588,7 +701,8 @@ export default function App() {
                       setAttachedImage(null);
                       setImageMaskCount(0);
                     }}
-                    className="text-slate-400 hover:text-rose-300"
+                    className="p-1 text-slate-400 hover:text-rose-300"
+                    aria-label="Remove image"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -596,156 +710,73 @@ export default function App() {
               </div>
             )}
 
-            <div className="mt-3 space-y-3">
-              <div>
-                <label className="mb-1 block text-[11px] font-medium text-slate-400">
-                  Extra private names / terms (comma-separated):
-                </label>
-                <input
-                  type="text"
-                  value={customTerms}
-                  onChange={(e) => setCustomTerms(e.target.value)}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="mb-1 block text-[11px] font-medium text-slate-400">
-                    Hybrid Inference Mode
-                  </label>
-                  <select
-                    value={mode}
-                    onChange={(e) => setMode(e.target.value as ModeKey)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-emerald-500"
+            {/* Task Pills */}
+            <div className="mt-4">
+              <div className="mb-1.5 text-[11px] font-medium text-slate-400">What do you need?</div>
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-2">
+                {TASK_OPTIONS.map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setTask(t.key)}
+                    className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                      task === t.key
+                        ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/50'
+                        : 'bg-slate-950 text-slate-400 ring-1 ring-slate-800 hover:text-slate-200'
+                    }`}
                   >
-                    {MODE_OPTIONS.map((m) => (
-                      <option key={m.key} value={m.key}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-[11px] font-medium text-slate-400">
-                    Analysis Task
-                  </label>
-                  <select
-                    value={task}
-                    onChange={(e) => setTask(e.target.value as AnalysisTask)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-emerald-500"
-                  >
-                    {TASK_OPTIONS.map((t) => (
-                      <option key={t.key} value={t.key}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    {t.label}
+                  </button>
+                ))}
               </div>
+            </div>
 
+            {/* Primary CTA: Analyze Safely / Stop */}
+            <div className="mt-4 flex gap-2">
               <button
                 onClick={handleRunPipeline}
                 disabled={running || !rawText.trim()}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {running ? (
                   <>
                     <RefreshCw className="h-4 w-4 animate-spin" />
-                    Streaming Hybrid AI...
+                    Analyzing Safely...
                   </>
                 ) : (
                   <>
                     <Play className="h-4 w-4 fill-current" />
-                    Shield Locally &amp; Run Hybrid AI
+                    Analyze Safely ({redaction.vault.length} secrets shielded)
                   </>
                 )}
               </button>
-            </div>
-          </section>
 
-          {/* Column 2: Stage 1 Local Privacy Shield */}
-          <section className="flex flex-col rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-xl">
-            <div className="mb-2.5 flex items-center justify-between gap-2">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
-                <Shield className="h-4 w-4 text-emerald-400" />
-                2. Anonymized Payload
-              </h2>
-              <div className="flex items-center gap-1.5">
-                <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300">
-                  {redaction.vault.length} shielded · {redaction.leaksFound} leaks
-                </span>
+              {running && (
                 <button
-                  onClick={() => setShowPayloadInspector((v) => !v)}
-                  title="Inspect exact outgoing network payload"
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300 hover:border-emerald-500/50 hover:text-white"
+                  onClick={handleStop}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-500/15 px-3.5 py-2.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/25"
                 >
-                  <Code2 className="h-3 w-3" />
-                  Audit
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                  Stop
                 </button>
-              </div>
-            </div>
-
-            <div className="mb-3 max-h-56 flex-1 overflow-y-auto whitespace-pre-wrap rounded-xl border border-emerald-500/20 bg-slate-950/90 p-3 font-mono text-xs leading-relaxed text-slate-200">
-              {showPayloadInspector ? (
-                <div>
-                  <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-amber-300">
-                    Exact Outgoing Prompt Sent to Firebase AI Logic (Zero Raw PII):
-                  </p>
-                  <HighlightedRedactedText text={outgoingPrompt} />
-                </div>
-              ) : (
-                <HighlightedRedactedText text={redaction.redactedText || 'Redacted preview...'} />
-              )}
-            </div>
-
-            {/* Local RAM Token Vault */}
-            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-              <div className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                <span>Local RAM Vault ({redaction.bytesShielded}B shielded)</span>
-                {stage1Meta && (
-                  <span className="text-emerald-400">
-                    {stage1Meta.usedOnDeviceAI
-                      ? `Nano NER: ${stage1Meta.latencyMs}ms`
-                      : 'Local Shield OK'}
-                  </span>
-                )}
-              </div>
-
-              {redaction.vault.length === 0 ? (
-                <p className="text-xs text-slate-500">No sensitive patterns detected yet.</p>
-              ) : (
-                <div className="max-h-36 space-y-1.5 overflow-y-auto pr-1">
-                  {redaction.vault.map((entry: VaultEntry) => (
-                    <div
-                      key={entry.token}
-                      className="flex items-center justify-between gap-2 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs"
-                    >
-                      <span className="font-mono font-semibold text-emerald-400">{entry.token}</span>
-                      <span className="truncate font-mono text-slate-400">{entry.original}</span>
-                    </div>
-                  ))}
-                </div>
               )}
             </div>
           </section>
 
-          {/* Column 3: Stage 2 Hybrid AI Output */}
-          <section className="flex flex-col rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-xl">
-            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+          {/* Right Column (7 cols): Clean AI Output & Human-Friendly Onboarding */}
+          <section className="flex flex-col rounded-2xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl lg:col-span-7">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
                 <Sparkles className="h-4 w-4 text-indigo-400" />
-                3. Hybrid AI Output
+                AI Analysis
               </h2>
 
               {result && (
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                   <span
-                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ${
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-semibold ${
                       result.inferenceSource === 'ON_DEVICE'
-                        ? 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/40'
-                        : 'bg-sky-500/15 text-sky-300 ring-sky-500/40'
+                        ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/40'
+                        : 'bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/40'
                     }`}
                   >
                     {result.inferenceSource === 'ON_DEVICE' ? (
@@ -753,123 +784,172 @@ export default function App() {
                     ) : (
                       <Cloud className="h-3 w-3" />
                     )}
-                    {result.inferenceSource}
+                    {result.inferenceSource === 'ON_DEVICE' ? 'On-Device Nano' : 'Cloud Gemini'}
                   </span>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">
+                  {result.cached && (
+                    <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 font-semibold text-emerald-300">
+                      Instant Cache
+                    </span>
+                  )}
+                  {result.fallbackUsed && (
+                    <span className="rounded-full bg-amber-500/20 px-2 py-0.5 font-semibold text-amber-300">
+                      Lite Fallback
+                    </span>
+                  )}
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 font-mono text-slate-300">
                     <Zap className="h-3 w-3 text-amber-400" />
-                    TTFT {result.ttftMs}ms · {result.latencyMs}ms
+                    {result.ttftMs}ms
+                  </span>
+                  <span className="rounded-full bg-slate-800 px-2 py-0.5 font-mono text-slate-400">
+                    Total {result.latencyMs}ms
                   </span>
                 </div>
               )}
             </div>
 
             {errorMsg && (
-              <div className="mb-3 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-200">
-                <p className="font-semibold">Inference Error:</p>
-                <p className="mt-1 break-words opacity-90">{errorMsg}</p>
-                {errorMsg.toLowerCase().includes('app check') && isLocalhost && (
-                  <button
-                    onClick={() => setShowDebugModal(true)}
-                    className="mt-2 inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2.5 py-1 text-[11px] font-semibold text-amber-200 ring-1 ring-amber-500/40 hover:bg-amber-500/30"
-                  >
-                    <KeyRound className="h-3 w-3" />
-                    Configure Localhost App Check Debug Token
-                  </button>
-                )}
+              <div className="mb-3 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3.5 text-xs text-rose-200">
+                <div className="mb-1 flex items-center gap-1.5 font-semibold text-rose-300">
+                  <FileWarning className="h-4 w-4" />
+                  Unable to complete analysis
+                </div>
+                <p className="leading-relaxed opacity-90">{errorMsg}</p>
               </div>
             )}
 
             {result?.wasMockEcho && (
-              <div className="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
-                Chromium mock Prompt API detected (no Gemini Nano weights downloaded yet). Switch mode to{' '}
-                <strong>Prefer Cloud</strong> or enable Gemini Nano in Chrome flags for real inference.
+              <div className="mb-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+                Your browser&apos;s built-in Gemini Nano weights aren&apos;t downloaded yet. Open{' '}
+                <strong>Privacy &amp; Tech</strong> → switch mode to <strong>Fast Cloud</strong> for
+                live Gemini Cloud inference.
               </div>
             )}
 
-            <div className="mb-3 min-h-[240px] flex-1 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/90 p-3.5">
+            <div className="min-h-[340px] flex-1 overflow-y-auto rounded-xl border border-slate-800/90 bg-slate-950/90 p-5">
               {displayedMarkdown ? (
-                <RichOutput markdown={displayedMarkdown} />
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center text-center text-slate-500">
-                  <Sparkles className="mb-2 h-8 w-8 text-slate-700" />
-                  <p className="text-xs">Click &ldquo;Shield Locally &amp; Run Hybrid AI&rdquo;</p>
-                  <p className="mt-1 text-[11px]">
-                    Streams live from Gemini Nano (On-Device) or Gemini Cloud via Firebase AI Logic.
+                <>
+                  <RichOutput markdown={displayedMarkdown} />
+                  {running && (
+                    <span className="mt-2 inline-block h-4 w-2 animate-pulse rounded-sm bg-emerald-400" />
+                  )}
+                </>
+              ) : running ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 py-12 text-center">
+                  <RefreshCw className="h-6 w-6 animate-spin text-emerald-400" />
+                  <div className="text-sm font-medium text-slate-200">
+                    Shielded {redaction.vault.length} secrets locally — streaming AI response...
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    0 bytes of raw PII sent over the network
                   </p>
+                </div>
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center py-8 text-center">
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 ring-1 ring-emerald-500/30">
+                    <ShieldCheck className="h-6 w-6 text-emerald-400" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-white">
+                    Ready to analyze — zero data leaked
+                  </h3>
+                  <p className="mt-1 max-w-md text-xs text-slate-400">
+                    Click <strong>Analyze Safely</strong> on the left to get an instant AI report.
+                  </p>
+
+                  <div className="mt-6 grid w-full max-w-lg grid-cols-1 gap-2.5 text-left sm:grid-cols-3">
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                      <div className="text-[11px] font-bold text-emerald-400">1. Auto-Mask</div>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Keys, phones, emails &amp; IDs are hidden locally in browser RAM.
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                      <div className="text-[11px] font-bold text-sky-400">2. Hybrid AI</div>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Only safe placeholders are analyzed by Gemini Nano or Cloud.
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                      <div className="text-[11px] font-bold text-indigo-400">3. Re-hydrate</div>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Restore real names &amp; details locally on your screen with 1 click.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
 
-            {(result || streamingText) && (
-              <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setRehydrate((v) => !v)}
-                    className={`flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition ${
-                      rehydrate
-                        ? 'border-amber-500/50 bg-amber-500/15 text-amber-200'
-                        : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
-                    }`}
-                  >
-                    {rehydrate ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    {rehydrate ? 'Hide Original PII' : 'Re-hydrate Locally'}
-                  </button>
+            {savedNotice && (
+              <div className="mt-2.5 flex items-center gap-1.5 text-xs text-emerald-400">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {savedNotice}
+              </div>
+            )}
 
-                  <button
-                    onClick={handleSaveToFirestore}
-                    disabled={savingHistory || !result}
-                    className="flex items-center justify-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-3 py-2 text-xs font-medium text-indigo-200 transition hover:bg-indigo-500/25 disabled:opacity-50"
-                  >
-                    <Database className="h-3.5 w-3.5" />
-                    {savingHistory ? 'Saving...' : 'Save to Firestore'}
-                  </button>
-                </div>
+            {/* Action Bar */}
+            {result && (
+              <div className="mt-3.5 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setRehydrate((r) => !r)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    rehydrate
+                      ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/50'
+                      : 'bg-slate-800 text-slate-200 ring-1 ring-slate-700 hover:bg-slate-700'
+                  }`}
+                >
+                  {rehydrate ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  {rehydrate ? 'Hide Original Details' : 'Show Original Details'}
+                </button>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={handleCopyReport}
-                    className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-1.5 text-[11px] font-medium text-slate-300 hover:bg-slate-800"
-                  >
-                    {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                    {copied ? 'Copied!' : 'Copy Markdown'}
-                  </button>
-                  <button
-                    onClick={handleExportMarkdown}
-                    className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-1.5 text-[11px] font-medium text-slate-300 hover:bg-slate-800"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    Export .md
-                  </button>
-                </div>
+                <button
+                  onClick={handleSaveToFirestore}
+                  disabled={savingHistory}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500/20 px-3 py-1.5 text-xs font-semibold text-indigo-200 ring-1 ring-indigo-500/40 hover:bg-indigo-500/30 disabled:opacity-50"
+                >
+                  <Database className="h-3.5 w-3.5" />
+                  {savingHistory ? 'Saving...' : 'Save Report'}
+                </button>
 
-                {savedNotice && (
-                  <p className="text-center text-[11px] text-emerald-400">{savedNotice}</p>
-                )}
+                <button
+                  onClick={handleCopyReport}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 ring-1 ring-slate-700 hover:bg-slate-700"
+                >
+                  {copied ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+
+                <button
+                  onClick={handleExportMarkdown}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 ring-1 ring-slate-700 hover:bg-slate-700"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export .md
+                </button>
               </div>
             )}
           </section>
         </div>
 
-        {/* Cloud Firestore Real-time Anonymized History */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-xl">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
-              <History className="h-4 w-4 text-indigo-400" />
-              Cloud Firestore — Saved Anonymized Reports (Zero Raw PII)
-            </h2>
-            <span className="text-xs text-slate-400">{history.length} recent records</span>
-          </div>
+        {/* Clean Saved History Strip (Only prominent when user has saved items) */}
+        {(history.length > 0 || firestoreError) && (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <History className="h-3.5 w-3.5 text-indigo-400" />
+                Your Saved Anonymized Reports ({history.length})
+              </h2>
+              <span className="text-[11px] text-slate-500">Private to this browser session</span>
+            </div>
 
-          {firestoreError && (
-            <p className="mb-2 text-xs text-amber-300">Firestore notice: {firestoreError}</p>
-          )}
+            {firestoreError && (
+              <p className="mb-2 text-xs text-amber-300">Firestore notice: {firestoreError}</p>
+            )}
 
-          {history.length === 0 ? (
-            <p className="text-xs text-slate-500">
-              No saved reports yet. Run an analysis and click &ldquo;Save to Firestore&rdquo; to sync anonymized insights.
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {history.map((item) => (
                 <div
                   key={item.id}
@@ -890,27 +970,29 @@ export default function App() {
                       e.stopPropagation();
                       deleteSavedAnalysis(item.id).catch(() => {});
                     }}
-                    title="Delete record"
+                    title="Delete saved report"
                     className="absolute right-2 top-2 rounded p-1 text-slate-600 opacity-0 transition hover:bg-rose-500/20 hover:text-rose-300 group-hover:opacity-100"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
-                  <div className="mb-1.5 flex items-center justify-between pr-5 text-[11px]">
-                    <span className="font-semibold uppercase text-indigo-300">{item.task}</span>
-                    <span className="text-emerald-400">{item.piiCount} PII</span>
+                  <div className="mb-1 flex items-center justify-between pr-5 text-[11px]">
+                    <span className="font-semibold uppercase text-indigo-300">
+                      {item.task.replace('_', ' ')}
+                    </span>
+                    <span className="text-emerald-400">{item.piiCount} shielded</span>
                   </div>
                   <p className="line-clamp-2 font-mono text-[11px] text-slate-400">
                     {item.redactedPreview}
                   </p>
                   <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500">
-                    <span>{item.inferenceSource}</span>
+                    <span>{item.inferenceSource === 'ON_DEVICE' ? 'On-Device' : 'Cloud'}</span>
                     <span>{item.latencyMs}ms</span>
                   </div>
                 </div>
               ))}
             </div>
-          )}
-        </section>
+          </section>
+        )}
       </main>
 
       {/* Local Image Privacy Redactor Modal */}
@@ -935,15 +1017,17 @@ export default function App() {
                 <KeyRound className="h-4 w-4 text-amber-400" />
                 Localhost App Check Debug Token
               </h3>
-              <button onClick={() => setShowDebugModal(false)} className="text-slate-400 hover:text-white">
+              <button
+                onClick={() => setShowDebugModal(false)}
+                className="text-slate-400 hover:text-white"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
             <p className="mb-3 text-xs leading-relaxed text-slate-400">
-              Because App Check is <strong>Enforced</strong> on Firebase AI Logic, local testing on{' '}
-              <code>localhost</code> requires a Debug Token registered in{' '}
-              <em>Firebase Console → App Check → Apps → hybrid → ⋮ → Manage debug tokens</em>.
-              (Production Hosting on <code>buildhybridai-tuananh.web.app</code> works automatically.)
+              App Check is <strong>Enforced</strong> on Firebase AI Logic. Local testing on{' '}
+              <code>localhost</code> needs a Debug Token from Firebase Console. Production Hosting
+              on <code>buildhybridai-tuananh.web.app</code> works automatically.
             </p>
             <input
               type="text"

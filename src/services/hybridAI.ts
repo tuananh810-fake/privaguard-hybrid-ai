@@ -12,6 +12,8 @@ export interface HybridResponse {
   ttftMs: number;
   modelUsed: string;
   wasMockEcho?: boolean;
+  cached?: boolean;
+  fallbackUsed?: boolean;
 }
 
 export interface AttachedImage {
@@ -19,6 +21,20 @@ export interface AttachedImage {
   mimeType: string;
   base64Data: string;
   previewUrl: string;
+}
+
+const FALLBACK_CLOUD_MODEL = 'gemini-2.5-flash-lite';
+const MAX_CACHE_ENTRIES = 20;
+const responseCache = new Map<string, HybridResponse>();
+
+function makeCacheKey(
+  prompt: string,
+  modeKey: ModeKey,
+  cloudModel: string,
+  image: AttachedImage | null
+): string {
+  const imgSig = image ? `${image.name}:${image.base64Data.length}` : 'no-img';
+  return `${modeKey}|${cloudModel}|${imgSig}|${prompt}`;
 }
 
 export function toInferenceMode(key: ModeKey): InferenceMode {
@@ -65,19 +81,26 @@ function detectSource(rawSource: string | undefined, modeKey: ModeKey): HybridRe
   return modeKey === 'ONLY_ON_DEVICE' ? 'ON_DEVICE' : 'IN_CLOUD';
 }
 
-/**
- * Streaming Hybrid Inference via Firebase AI Logic SDK.
- * Streams tokens in real time, tracks TTFT (Time-to-First-Token) + total latency,
- * supports optional multimodal image attachments, and transparently reports ON_DEVICE vs IN_CLOUD.
- */
-export async function generateHybridStream(
-  prompt: string,
+function isRateLimitOrTransientError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('quota') ||
+    msg.includes('rate limit') ||
+    msg.includes('503') ||
+    msg.includes('overloaded')
+  );
+}
+
+async function runSingleStream(
+  parts: Array<string | Part>,
   modeKey: ModeKey,
-  cloudModel = 'gemini-2.5-flash',
-  image: AttachedImage | null = null,
-  onChunk?: (partialText: string) => void
+  cloudModel: string,
+  started: number,
+  onChunk?: (partialText: string) => void,
+  signal?: AbortSignal
 ): Promise<HybridResponse> {
-  const started = performance.now();
   let ttftMs = 0;
 
   const model = getGenerativeModel(ai, {
@@ -85,27 +108,22 @@ export async function generateHybridStream(
     mode: toInferenceMode(modeKey),
   });
 
-  const parts: Array<string | Part> = [prompt];
-  if (image) {
-    parts.push({
-      type: 'inlineData',
-      inlineData: {
-        mimeType: image.mimeType,
-        data: image.base64Data,
-      },
-    });
-  }
-
   try {
     const streamResult = await model.generateContentStream(parts);
     let accumulated = '';
     for await (const chunk of streamResult.stream) {
+      if (signal?.aborted) {
+        throw new DOMException('Analysis cancelled by user.', 'AbortError');
+      }
       const chunkText = chunk.text();
       if (chunkText) {
         if (ttftMs === 0) ttftMs = Math.round(performance.now() - started);
         accumulated += chunkText;
         onChunk?.(accumulated);
       }
+    }
+    if (signal?.aborted) {
+      throw new DOMException('Analysis cancelled by user.', 'AbortError');
     }
     const finalResp = (await streamResult.response) as unknown as {
       text: () => string;
@@ -125,8 +143,17 @@ export async function generateHybridStream(
       wasMockEcho,
     };
   } catch (streamErr) {
+    if (signal?.aborted || (streamErr instanceof DOMException && streamErr.name === 'AbortError')) {
+      throw streamErr;
+    }
+    if (isRateLimitOrTransientError(streamErr)) {
+      throw streamErr;
+    }
     // Fallback to non-streaming generateContent if browser on-device stream throws
     const result = await model.generateContent(parts);
+    if (signal?.aborted) {
+      throw new DOMException('Analysis cancelled by user.', 'AbortError');
+    }
     const latencyMs = Math.round(performance.now() - started);
     const response = result.response as unknown as {
       text: () => string;
@@ -149,8 +176,77 @@ export async function generateHybridStream(
 }
 
 /**
+ * Streaming Hybrid Inference via Firebase AI Logic SDK.
+ * Includes in-memory instant cache, AbortSignal cancellation, and automatic
+ * rate-limit (HTTP 429 / 503) fallback to gemini-2.5-flash-lite for multi-user resilience.
+ */
+export async function generateHybridStream(
+  prompt: string,
+  modeKey: ModeKey,
+  cloudModel = 'gemini-2.5-flash',
+  image: AttachedImage | null = null,
+  onChunk?: (partialText: string) => void,
+  signal?: AbortSignal
+): Promise<HybridResponse> {
+  const cacheKey = makeCacheKey(prompt, modeKey, cloudModel, image);
+  const cached = responseCache.get(cacheKey);
+  if (cached && !cached.wasMockEcho) {
+    onChunk?.(cached.text);
+    return { ...cached, latencyMs: 1, ttftMs: 1, cached: true };
+  }
+
+  const started = performance.now();
+  const parts: Array<string | Part> = [prompt];
+  if (image) {
+    parts.push({
+      type: 'inlineData',
+      inlineData: {
+        mimeType: image.mimeType,
+        data: image.base64Data,
+      },
+    });
+  }
+
+  try {
+    const res = await runSingleStream(parts, modeKey, cloudModel, started, onChunk, signal);
+    if (!res.wasMockEcho) {
+      if (responseCache.size >= MAX_CACHE_ENTRIES) {
+        const firstKey = responseCache.keys().next().value;
+        if (firstKey) responseCache.delete(firstKey);
+      }
+      responseCache.set(cacheKey, res);
+    }
+    return res;
+  } catch (err) {
+    if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+      throw err;
+    }
+    // Multi-user resilience: if primary model hits 429 / 503, retry with fast lite model
+    if (isRateLimitOrTransientError(err) && cloudModel !== FALLBACK_CLOUD_MODEL && modeKey !== 'ONLY_ON_DEVICE') {
+      await new Promise((r) => setTimeout(r, 600));
+      if (signal?.aborted) throw new DOMException('Analysis cancelled by user.', 'AbortError');
+      const fallbackRes = await runSingleStream(
+        parts,
+        modeKey,
+        FALLBACK_CLOUD_MODEL,
+        started,
+        onChunk,
+        signal
+      );
+      return { ...fallbackRes, fallbackUsed: true };
+    }
+    if (isRateLimitOrTransientError(err)) {
+      throw new Error(
+        'Cloud AI is temporarily busy (free-tier rate limit reached by concurrent users). Please wait a few seconds or switch to Only On-Device mode.'
+      );
+    }
+    throw err;
+  }
+}
+
+/**
  * Stage 1 (On-Device): Ask Gemini Nano to find person names / company names strictly on-device.
- * Never falls back to cloud so raw PII never leaves the browser.
+ * Only called when Gemini Nano is actually available on-device (zero wasted delay otherwise).
  */
 export async function detectEntitiesOnDevice(rawText: string): Promise<{
   entities: string[];
