@@ -58,23 +58,32 @@ PrivaGuard AI is a calm, Notion-style Hybrid AI workspace where **0 detected PII
 
 ---
 
-## 2-Minute Judge Demo Script (4 Aha Moments)
+## Final Demo Video Chapters (2:47 · 1080p)
 
-| Timestamp | Aha Moment | What Judges See |
+| Timestamp | Chapter | What Judges See |
 |---|---|---|
-| **0:00 – 0:30** | **1. Hybrid Semantic Masking & Source Provenance** | Click **Try sample PDF**, open **Diff** & **Payload**, click **Scan semantic PII (Nano)** before sending: token chips display `regex`, `Nano`, and `manual` tags; highlight a word and press `Ctrl/Cmd+Shift+M` (`Mark as sensitive`); verify `0 detected PII sent to cloud`. |
-| **0:30 – 1:05** | **2. Structured Audit + Local Peek + Hybrid Metrics** | Click **Analyze safely** → typed JSON risk card renders with `Ran on: Cloud (gemini-3.6-flash)`, click any token chip to peek real values locally, inspect the **Hybrid Metrics Strip** (`Engine · Latency · TTFT · Masked rx/Na/man · Bytes to cloud · Raw PII bytes sent: 0 B`). |
-| **1:05 – 1:35** | **3. 1-Click Auto-OCR Image Masking (`eng+vie`)** | Click **Try sample image** (synthetic ID card) → **Auto-detect PII** (`eng+vie` OCR masks ID, phone, and email locally in browser RAM). |
-| **1:35 – 2:00** | **4. True Offline PWA → On-Device Gemini Nano** | Disconnect network / enable **Offline** + show DevTools Network tab → PWA Service Worker still opens the app shell and routes analysis to **Device (Nano)** with **0 external requests** and **0 B sent to cloud**. |
+| **0:00 – 0:20** | **Intro · Hybrid Privacy Vision** | Confidential contract risk → on-device Gemini Nano local RAM shield → only safe placeholder tokens travel to Cloud Gemini (`0 detected PII leaked`). |
+| **0:20 – 0:53** | **Step 1 / 4 · Local PDF & 3-Layer Shield** | Live on Firebase Hosting (`Gemini Nano ready`) → **Try sample PDF** (2-page NDA parsed 100% locally) → **Diff** (regex masks emails, phones, API keys, IDs) → **Scan semantic PII (Nano)** → **Payload** (`0 detected PII included`). |
+| **0:53 – 1:41** | **Step 2 / 4 · Hybrid Audit, RAM Re-hydration & Cloud Snapshot** | **Analyze safely** in `Auto Hybrid` (`Device (Nano)` · `0 B to cloud`, seamless Cloud `gemini-3.6-flash` fallback on safe tokens) → structured GDPR/SOC2/OWASP audit + **Hybrid Metrics Strip** → **Show real names** instant RAM restore → **Save** → reopen from **History** in read-only **Anonymized Cloud Snapshot** mode (`Original secrets were never persisted`). |
+| **1:41 – 2:01** | **Step 3 / 4 · Client-Side Auto-OCR Image Redaction** | **Try sample image** (employee ID card) → Image Redactor → **Auto-detect PII** (`tesseract.js` locally draws 3 solid black boxes) → **Apply mask (3)** attaches only the redacted image. |
+| **2:01 – 2:26** | **Step 4 / 4 · Strict Offline Mode & Multimodal Nano Audit** | **Settings** → enable **Simulate offline mode** + **Strict Offline** (`Offline · On-device`) → load **DevOps log** + redacted ID card → **Analyze safely** executes full multimodal incident audit entirely on-device (`0 B` to cloud, offline PWA shell). |
+| **2:26 – 2:47** | **Outro · Architecture & Verified Benchmarks** | Cloud-only vs On-device-only vs PrivaGuard Hybrid comparison, `100.0% F1`, `16/16` unit tests, `0.27 ms/doc`, `51.8 kB` gzip bundle, Firebase stack & live links. |
 
 ---
 
-## Demo Video & GIF Shot List (2 min)
+## Devpost Form Quick-Fill Checklist
 
-Use Chrome with built-in Gemini Nano enabled (`chrome://flags/#prompt-api-for-gemini-nano`) at `1440×900` (100% zoom, DevTools docked on right for Shot 5):
-
-1. **0:00 – 0:15 · Chrome with `Gemini Nano ready`:** Open `https://buildhybridai-tuananh.web.app`, zoom briefly on the topbar **`Gemini Nano ready`** pill and **`Hybrid · Nano ready`** status indicator. *(Good candidate for README hero GIF opening frame.)*
-2. **0:15 – 0:45 · 1-Click *Try sample PDF* → *Scan semantic PII (Nano)* → Diff & Payload:** Click **Try sample PDF** (2-page NDA parsed locally), switch to **Diff** (and briefly **Payload**), click **Scan semantic PII (Nano)**, highlight a project codename + `Ctrl/Cmd+Shift+M`, and show `regex` + `Nano` + `manual` chips with `0 detected PII sent to cloud`. *(Capture 8–10 s clip here for README animated GIF.)*
-3. **0:45 – 1:15 · *Analyze safely* → Structured JSON Audit + Click-to-Peek + Hybrid Metrics Strip:** Click **Analyze safely**, show the typed JSON risk card (`Risk level · Score · Frameworks · Checklist`), click a `[SECRET_1]` / `[PERSON_1]` chip to peek the real value locally, and highlight the 6-column **Hybrid Metrics Strip** (`Raw PII bytes sent: 0 B`).
-4. **1:15 – 1:35 · *Try sample image* → Auto-OCR (`eng+vie`):** Click **Try sample image**, open **Auto-detect PII**, watch local OCR progress percentage (`eng+vie`) draw black redaction masks over CCCD, phone, and email in browser RAM, and apply the masked image.
-5. **1:35 – 2:00 · Offline Toggle + DevTools Network Proof:** Open Chrome DevTools → **Network** tab (clear log), toggle **Offline** (or DevTools Network → Offline), reload to prove PWA app shell loads offline, click **Analyze safely**, and show **0 external network requests**, **`Ran on: Device (Nano)`**, and **`Bytes to cloud: 0 B`**.
+- **Project Name:** `PrivaGuard AI`
+- **Tagline (<= 140 chars):** `Use frontier cloud AI on confidential docs & IDs — on-device Gemini Nano shields PII in RAM so 0 detected secrets ever reach the cloud.`
+- **Built With:** `firebase`, `firebase-ai-logic`, `gemini-nano`, `gemini`, `firebase-app-check`, `cloud-firestore`, `firebase-hosting`, `firebase-remote-config`, `react`, `typescript`, `tailwindcss`, `vite`, `pwa`, `tesseract-js`, `pdf-js`
+- **Try It Out Links:**
+  - Live Web App: `https://buildhybridai-tuananh.web.app`
+  - GitHub Repository: `https://github.com/tuananh810-fake/privaguard-hybrid-ai`
+- **Image Gallery (1080p PNGs in `docs/screenshots/`):**
+  1. `06-architecture-metrics-slide.png` *(recommended Cover / Thumbnail)*
+  2. `01-local-diff-shield.png`
+  3. `02-payload-zero-pii.png`
+  4. `03-cloud-snapshot-audit.png`
+  5. `04-auto-ocr-id-redaction.png`
+  6. `05-strict-offline-nano.png`
+- **Demo Video:** Upload `submission-pack/privaguard-demo-v1.mp4` (`2:47`, burned-in English captions) or `privaguard-demo-clean.mp4` + `privaguard-demo.srt` to YouTube (Public/Unlisted) and paste the URL into Devpost.

@@ -2,14 +2,31 @@
 
 > **Use cloud AI on confidential docs — secrets never leave your browser.**
 
-![PrivaGuard AI Workspace](docs/privaguard-v6-workspace.png)
+![PrivaGuard AI Demo Walkthrough](docs/privaguard-demo.gif)
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Firebase%20Hosting-0F7B6C?style=flat-square)](https://buildhybridai-tuananh.web.app)
 [![Built for](https://img.shields.io/badge/Hackathon-%23BuildHybridAI%202026-37352F?style=flat-square)](https://buildhybridai.devpost.com/)
 [![Firebase AI Logic](https://img.shields.io/badge/Firebase%20AI%20Logic-Hybrid%20Nano%20%2B%20Gemini%203.6%20Flash-DD2C00?style=flat-square)](https://firebase.google.com/docs/ai-logic)
 [![Tests](https://img.shields.io/badge/Unit%20Tests-16%2F16%20PASS-0F7B6C?style=flat-square)](#benchmarks--verification)
 
-**Live App:** https://buildhybridai-tuananh.web.app · **User Guide:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
+**Live App:** https://buildhybridai-tuananh.web.app · **User Guide:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) · **Devpost Pack:** [DEVPOST_SUBMISSION.md](DEVPOST_SUBMISSION.md)
+
+<details>
+<summary><strong>📸 Production Screenshots (1080p)</strong></summary>
+
+| Local Regex + Nano Diff | Wire Payload (`0 detected PII`) |
+|---|---|
+| ![Local Diff Shield](docs/screenshots/01-local-diff-shield.png) | ![Payload Zero PII](docs/screenshots/02-payload-zero-pii.png) |
+
+| Read-Only Cloud Snapshot Audit | Client-Side Auto-OCR Image Redaction |
+|---|---|
+| ![Cloud Snapshot Audit](docs/screenshots/03-cloud-snapshot-audit.png) | ![Auto-OCR ID Redaction](docs/screenshots/04-auto-ocr-id-redaction.png) |
+
+| Strict Offline Multimodal Nano (`0 B` Cloud) | Architecture & Verified Benchmarks |
+|---|---|
+| ![Strict Offline Nano](docs/screenshots/05-strict-offline-nano.png) | ![Architecture & Metrics](docs/screenshots/06-architecture-metrics-slide.png) |
+
+</details>
 
 ---
 
