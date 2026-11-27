@@ -2,8 +2,8 @@ import React, { memo, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { VaultEntry } from '../services/piiVault';
 
-const TOKEN_REGEX = /(\[(?:SECRET|CARD|ID|EMAIL|PHONE|IP|PERSON|CUSTOM)_\d+\])/g;
-const EXACT_TOKEN_REGEX = /^\[(?:SECRET|CARD|ID|EMAIL|PHONE|IP|PERSON|CUSTOM)_\d+\]$/;
+const TOKEN_REGEX = /(\[[A-Z][A-Z0-9]*_\d+\])/g;
+const EXACT_TOKEN_REGEX = /^\[[A-Z][A-Z0-9]*_\d+\]$/;
 
 /**
  * Calm Notion-style inline pill colors (subtle pastel in Light mode, muted tint in Dark mode).
@@ -21,7 +21,15 @@ function tokenStyle(token: string): string {
     return 'bg-[#EAE4F2] text-[#5B3B8C] dark:bg-[#2C2338] dark:text-[#C4B5FD]';
   if (token.startsWith('[IP_'))
     return 'bg-[#E1F2F0] text-[#0F685B] dark:bg-[#19322E] dark:text-[#6EE7B7]';
+  if (token.startsWith('[ORG_') || token.startsWith('[ADDRESS_') || token.startsWith('[LOCATION_'))
+    return 'bg-[#E8ECF5] text-[#2F4578] dark:bg-[#1F293D] dark:text-[#93C5FD]';
   return 'bg-[#DDEDEA] text-[#0F7B6C] dark:bg-[#1A332D] dark:text-[#6EE7B7]';
+}
+
+function sourceLabel(source: VaultEntry['source']): string {
+  if (source === 'nano') return 'Nano';
+  if (source === 'manual') return 'manual';
+  return 'regex';
 }
 
 interface TokenChipProps {
@@ -37,9 +45,11 @@ const InteractiveTokenChip: React.FC<TokenChipProps> = memo(({ token, vaultLooku
     return (
       <span
         translate="no"
-        className={`mx-0.5 inline-block rounded px-1.5 py-0.5 font-mono text-[12px] font-medium ${tokenStyle(token)}`}
+        title={`Token ${token} is not in your local vault (hallucinated or stale placeholder)`}
+        className="mx-0.5 inline-flex items-baseline gap-1 rounded border border-dashed border-[var(--n-border-strong)] bg-[var(--n-surface)] px-1.5 py-0.5 font-mono text-[12px] font-medium text-[var(--n-muted)]"
       >
-        {token}
+        <span>{token}</span>
+        <span className="font-sans text-[10px] font-normal">unknown token</span>
       </span>
     );
   }
@@ -49,14 +59,21 @@ const InteractiveTokenChip: React.FC<TokenChipProps> = memo(({ token, vaultLooku
       type="button"
       translate="no"
       onClick={() => setPeek((v) => !v)}
-      title={peek ? 'Click to hide again' : 'Click to peek original value locally'}
-      className={`mx-0.5 inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[12px] font-medium transition ${
+      title={
+        peek
+          ? `Click to hide again (detected by ${sourceLabel(entry.source)})`
+          : `Click to peek original value locally (detected by ${sourceLabel(entry.source)})`
+      }
+      className={`mx-0.5 inline-flex items-baseline gap-1 rounded px-1.5 py-0.5 font-mono text-[12px] font-medium transition ${
         peek
           ? 'bg-[var(--n-warn-soft)] text-[var(--n-warn)] ring-1 ring-[var(--n-warn-border)]'
           : `${tokenStyle(token)} hover:opacity-85`
       }`}
     >
-      {peek ? entry.original : token}
+      <span>{peek ? entry.original : token}</span>
+      <span className="font-sans text-[9.5px] font-normal opacity-65">
+        {sourceLabel(entry.source)}
+      </span>
     </button>
   );
 });
@@ -65,7 +82,7 @@ InteractiveTokenChip.displayName = 'InteractiveTokenChip';
 
 function renderInline(text: string, vaultLookup?: Record<string, VaultEntry>): React.ReactNode[] {
   const parts = text.split(
-    /(\*\*[^*]+\*\*|\*[^*\n]+\*|`[^`]+`|\[(?:SECRET|CARD|ID|EMAIL|PHONE|IP|PERSON|CUSTOM)_\d+\])/g
+    /(\*\*[^*]+\*\*|\*[^*\n]+\*|`[^`]+`|\[[A-Z][A-Z0-9]*_\d+\])/g
   );
   return parts.map((part, idx) => {
     if (!part) return null;

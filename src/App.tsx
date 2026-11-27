@@ -18,6 +18,7 @@ import {
   PiiCategory,
   redactLocally,
   rehydrateLocally,
+  TaggedSensitiveTerm,
   VaultEntry,
   verifyZeroLeak,
 } from './services/piiVault';
@@ -26,7 +27,6 @@ import {
   AttachedImage,
   buildTaskPrompt,
   checkChromeNanoAvailability,
-  detectEntitiesOnDevice,
   FollowUpMessage,
   generateFollowUpStream,
   generateHybridStream,
@@ -34,11 +34,12 @@ import {
   ModeKey,
   NanoAvailability,
 } from './services/hybridAI';
+import type { NanoDiscoveredEntity } from './services/nanoEntityDiscovery';
 import { classifyDroppedFile, parseDocumentLocally } from './services/documentParser';
 import type { SavedAnalysis } from './services/historyStore';
 import { TechDrawer } from './components/TechDrawer';
 import { DocumentInputPanel, InputTabKey } from './components/DocumentInputPanel';
-import { AnalysisOutputPanel } from './components/AnalysisOutputPanel';
+import { AnalysisOutputPanel, RunMetrics } from './components/AnalysisOutputPanel';
 import { HistoryStrip } from './components/HistoryStrip';
 
 const ImageRedactorModal = lazy(() =>
@@ -72,6 +73,14 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [simulatedOffline, setSimulatedOffline] = useState(false);
   const [nanoStatus, setNanoStatus] = useState<NanoAvailability>('unavailable');
+  const [nanoChecked, setNanoChecked] = useState(false);
+  const [nanoBannerDismissed, setNanoBannerDismissed] = useState(() => {
+    try {
+      return typeof localStorage !== 'undefined' && localStorage.getItem('privaguard_nano_banner_dismissed') === '1';
+    } catch {
+      return false;
+    }
+  });
   const [remoteSettings, setRemoteSettings] = useState<RemoteSettings>({
     defaultInferenceMode: 'PREFER_ON_DEVICE',
     cloudModel: 'gemini-3.6-flash',
@@ -79,10 +88,11 @@ export default function App() {
     loadedFromServer: false,
   });
 
-  const [aiDiscoveredEntities, setAiDiscoveredEntities] = useState<string[]>([]);
+  const [aiDiscoveredEntities, setAiDiscoveredEntities] = useState<NanoDiscoveredEntity[]>([]);
   const [extraFollowUpVault, setExtraFollowUpVault] = useState<VaultEntry[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [result, setResult] = useState<HybridResponse | null>(null);
+  const [runMetrics, setRunMetrics] = useState<RunMetrics | null>(null);
   const [rehydrate, setRehydrate] = useState(false);
   const [running, setRunning] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -151,7 +161,15 @@ export default function App() {
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
 
-    checkChromeNanoAvailability().then(setNanoStatus);
+    checkChromeNanoAvailability()
+      .then((status) => {
+        setNanoStatus(status);
+        setNanoChecked(true);
+      })
+      .catch(() => {
+        setNanoStatus('unavailable');
+        setNanoChecked(true);
+      });
     refreshRemoteConfig();
 
     let unsubFirestore: (() => void) | null = null;
@@ -199,17 +217,60 @@ export default function App() {
     };
   }, [refreshRemoteConfig, loadHistoryStore]);
 
-  const extraTerms = useMemo(() => {
-    const manual = customTerms
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    return Array.from(new Set([...manual, ...aiDiscoveredEntities]));
-  }, [customTerms, aiDiscoveredEntities]);
+  const manualTermsList = useMemo(
+    () =>
+      customTerms
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    [customTerms]
+  );
+
+  const handleAddManualTerm = useCallback((term: string) => {
+    const clean = term.trim().replace(/,/g, ' ');
+    if (clean.length < 2) return;
+    setCustomTerms((prev) => {
+      const existing = prev
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (existing.some((t) => t.toLowerCase() === clean.toLowerCase())) {
+        return prev;
+      }
+      return [...existing, clean].join(', ');
+    });
+  }, []);
+
+  const handleRemoveManualTerm = useCallback((term: string) => {
+    const target = term.toLowerCase();
+    setCustomTerms((prev) =>
+      prev
+        .split(',')
+        .map((s) => s.trim())
+        .filter((t) => t && t.toLowerCase() !== target)
+        .join(', ')
+    );
+  }, []);
+
+  const taggedTerms = useMemo<TaggedSensitiveTerm[]>(() => {
+    const manualTerms: TaggedSensitiveTerm[] = manualTermsList.map((text) => ({
+      text,
+      source: 'manual',
+      category: 'CUSTOM',
+    }));
+    const nanoTerms: TaggedSensitiveTerm[] = aiDiscoveredEntities.map((e) => ({
+      text: e.text,
+      source: 'nano',
+      category: e.type,
+    }));
+    return [...nanoTerms, ...manualTerms];
+  }, [manualTermsList, aiDiscoveredEntities]);
+
+  const extraTerms = useMemo(() => taggedTerms.map((t) => t.text), [taggedTerms]);
 
   const redaction = useMemo(
-    () => redactLocally(deferredRawText, extraTerms, categories),
-    [deferredRawText, extraTerms, categories]
+    () => redactLocally(deferredRawText, taggedTerms, categories),
+    [deferredRawText, taggedTerms, categories]
   );
 
   const combinedVault = useMemo(() => {
@@ -369,23 +430,31 @@ export default function App() {
     try {
       const effectiveMode: ModeKey = !effectiveOnline ? 'ONLY_ON_DEVICE' : mode;
 
-      let discovered: string[] = [];
-      if (
-        nanoStatus === 'available' &&
-        (effectiveMode === 'PREFER_ON_DEVICE' || effectiveMode === 'ONLY_ON_DEVICE')
-      ) {
-        const localScan = await detectEntitiesOnDevice(rawText);
+      let discovered: NanoDiscoveredEntity[] = [];
+      if (nanoStatus === 'available') {
+        const regexOnly = redactLocally(rawText, [], categories);
+        const { discoverSemanticEntitiesWithNano } = await import('./services/nanoEntityDiscovery');
+        const localScan = await discoverSemanticEntitiesWithNano(rawText, {
+          alreadyMaskedByRegex: regexOnly.vault.map((v) => v.original),
+          timeoutMs: 5000,
+          signal: controller.signal,
+        });
         if (controller.signal.aborted) return;
         discovered = localScan.entities;
         setAiDiscoveredEntities(discovered);
       }
 
-      const manual = customTerms
+      const manualTerms: TaggedSensitiveTerm[] = customTerms
         .split(',')
         .map((s) => s.trim())
-        .filter(Boolean);
-      const merged = Array.from(new Set([...manual, ...discovered]));
-      const finalRedaction = redactLocally(rawText, merged, categories);
+        .filter(Boolean)
+        .map((text) => ({ text, source: 'manual', category: 'CUSTOM' }));
+      const nanoTerms: TaggedSensitiveTerm[] = discovered.map((e) => ({
+        text: e.text,
+        source: 'nano',
+        category: e.type,
+      }));
+      const finalRedaction = redactLocally(rawText, [...nanoTerms, ...manualTerms], categories);
 
       const prompt = buildTaskPrompt(finalRedaction.redactedText, task, Boolean(attachedImage));
       const useStructuredAudit = task === 'risk_audit' && effectiveMode !== 'ONLY_ON_DEVICE';
@@ -404,7 +473,20 @@ export default function App() {
       );
 
       if (!controller.signal.aborted) {
+        const promptBytes =
+          typeof TextEncoder !== 'undefined'
+            ? new TextEncoder().encode(prompt).length
+            : prompt.length;
+        const imgBytes = attachedImage ? Math.round((attachedImage.base64Data.length * 3) / 4) : 0;
+        const bytesSentToCloud = aiRes.inferenceSource === 'ON_DEVICE' ? 0 : promptBytes + imgBytes;
+
         setResult(aiRes);
+        setRunMetrics({
+          sourceCounts: finalRedaction.sourceCounts,
+          bytesSentToCloud,
+          rawPiiBytesSent: finalRedaction.leaksFound,
+          shieldTimeMs: finalRedaction.shieldTimeMs,
+        });
         setStreamingText(aiRes.text);
       }
     } catch (err) {
@@ -454,7 +536,7 @@ export default function App() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const followUpRedaction = redactLocally(rawQuestion, extraTerms, categories, combinedVault);
+      const followUpRedaction = redactLocally(rawQuestion, taggedTerms, categories, combinedVault);
       if (followUpRedaction.vault.length > combinedVault.length) {
         setExtraFollowUpVault(followUpRedaction.vault);
       }
@@ -511,7 +593,7 @@ export default function App() {
     },
     [
       result,
-      extraTerms,
+      taggedTerms,
       categories,
       combinedVault,
       followUps,
@@ -548,12 +630,13 @@ export default function App() {
 
     const verificationFooter = [
       '\n\n---',
-      '### PrivaGuard Zero-Leak Verification',
+      '### PrivaGuard Local Detection & Masking Proof',
       `- **Timestamp (UTC):** ${new Date().toISOString()}`,
-      `- **Inference Source:** ${result?.inferenceSource === 'ON_DEVICE' ? 'On-Device Gemini Nano' : result?.modelUsed || 'Firebase AI Logic'}`,
-      `- **PII Items Shielded Locally:** ${combinedVault.length}`,
+      `- **Inference Engine:** ${result?.inferenceSource === 'ON_DEVICE' ? 'Device (Gemini Nano)' : `Cloud (${result?.modelUsed || 'gemini-3.6-flash'})`}`,
+      `- **Detected PII Masked Locally:** ${combinedVault.length} (regex ${redaction.sourceCounts.regex} / Nano ${redaction.sourceCounts.nano} / manual ${redaction.sourceCounts.manual})`,
       `- **Private Bytes Protected in RAM:** ${redaction.bytesShielded} bytes`,
-      `- **Raw PII Leaked:** ${leakCheck} bytes`,
+      `- **Detected PII Sent to Cloud:** ${leakCheck} (0 detected PII sent to cloud when 0)`,
+      `- **Detection Scope:** regex + on-device Nano + manual marks`,
       `- **Sanitized Payload SHA-256:** \`${payloadHash}\``,
     ].join('\n');
 
@@ -601,6 +684,12 @@ export default function App() {
       ttftMs: item.ttftMs || item.latencyMs,
       modelUsed: item.modelUsed,
     });
+    setRunMetrics({
+      sourceCounts: { regex: item.piiCount, nano: 0, manual: 0 },
+      bytesSentToCloud: item.inferenceSource === 'ON_DEVICE' ? 0 : item.redactedPreview.length,
+      rawPiiBytesSent: 0,
+      shieldTimeMs: 0,
+    });
     setFollowUps([]);
     setFollowUpStreaming('');
   }, []);
@@ -624,6 +713,15 @@ export default function App() {
     window.location.reload();
   }
 
+  const handleDismissNanoBanner = useCallback(() => {
+    setNanoBannerDismissed(true);
+    try {
+      localStorage.setItem('privaguard_nano_banner_dismissed', '1');
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-[var(--n-bg)] text-[var(--n-text)]">
       {/* Ultra-clean 48px Notion Topbar */}
@@ -633,6 +731,12 @@ export default function App() {
           <h1 className="text-[14.5px] font-semibold tracking-tight text-[var(--n-text)]">
             PrivaGuard
           </h1>
+          {nanoStatus === 'available' && (
+            <span className="hidden items-center gap-1 rounded bg-[var(--n-accent-soft)] px-2 py-0.5 text-[11.5px] font-medium text-[var(--n-accent)] sm:inline-flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--n-accent)]" />
+              Gemini Nano ready
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -654,7 +758,7 @@ export default function App() {
                 : effectiveOnline
                   ? nanoStatus === 'available'
                     ? 'Hybrid · Nano ready'
-                    : 'Protected · Cloud'
+                    : 'Cloud · Masked tokens'
                   : 'Offline · On-device'}
             </span>
           </button>
@@ -682,6 +786,34 @@ export default function App() {
         </div>
       </header>
 
+      {/* Dismissible Notion Banner when On-Device Nano is Unavailable */}
+      {nanoChecked && nanoStatus !== 'available' && !nanoBannerDismissed && (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-3 border-b border-[var(--n-border)] bg-[var(--n-surface)] px-4 py-1.5 text-[12px] text-[var(--n-muted)] sm:px-6"
+        >
+          <p className="min-w-0 truncate sm:whitespace-normal">
+            On-device model unavailable — running Cloud with masked tokens only ·{' '}
+            <a
+              href="https://developer.chrome.com/docs/ai/built-in"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-[var(--n-text)] underline underline-offset-2 hover:text-[var(--n-accent)]"
+            >
+              How to enable Gemini Nano
+            </a>
+          </p>
+          <button
+            type="button"
+            onClick={handleDismissNanoBanner}
+            aria-label="Dismiss Gemini Nano availability notice"
+            className="shrink-0 rounded p-0.5 text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Notion Split-View Workspace */}
       <main>
         <div className="grid grid-cols-1 lg:grid-cols-2">
@@ -701,6 +833,9 @@ export default function App() {
             vaultLookup={vaultLookup}
             leakCheck={leakCheck}
             outgoingPrompt={outgoingPrompt}
+            manualTerms={manualTermsList}
+            onAddManualTerm={handleAddManualTerm}
+            onRemoveManualTerm={handleRemoveManualTerm}
             attachedImage={attachedImage}
             imageMaskCount={imageMaskCount}
             onOpenImageRedactor={() => setShowImageRedactor(true)}
@@ -718,6 +853,7 @@ export default function App() {
           <div ref={outputContainerRef} className="flex flex-col">
             <AnalysisOutputPanel
               result={result}
+              runMetrics={runMetrics}
               displayedMarkdown={displayedMarkdown}
               running={running}
               errorMsg={errorMsg}

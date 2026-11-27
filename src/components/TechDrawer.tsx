@@ -19,6 +19,8 @@ export const CATEGORY_LABELS: { key: PiiCategory; label: string }[] = [
   { key: 'PHONE', label: 'Phones' },
   { key: 'IP', label: 'IPs' },
   { key: 'PERSON', label: 'Names' },
+  { key: 'ORG', label: 'Orgs (Nano)' },
+  { key: 'ADDRESS', label: 'Addresses (Nano)' },
 ];
 
 interface TechDrawerProps {
@@ -113,7 +115,12 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
                       key={entry.token}
                       className="flex items-center justify-between gap-2 rounded px-2 py-1 hover:bg-[var(--n-hover)]"
                     >
-                      <span className="font-medium text-[var(--n-accent)]">{entry.token}</span>
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        <span className="font-medium text-[var(--n-accent)]">{entry.token}</span>
+                        <span className="rounded bg-[var(--n-bg)] px-1 py-0.2 font-sans text-[10px] text-[var(--n-muted)]">
+                          {entry.source === 'nano' ? 'Nano' : entry.source}
+                        </span>
+                      </span>
                       <span className="truncate text-[var(--n-muted)]">{entry.original}</span>
                     </div>
                   ))

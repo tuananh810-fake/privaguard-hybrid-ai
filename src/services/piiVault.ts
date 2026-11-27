@@ -6,17 +6,37 @@ export type PiiCategory =
   | 'PHONE'
   | 'IP'
   | 'PERSON'
+  | 'ORG'
+  | 'ADDRESS'
+  | 'LOCATION'
   | 'CUSTOM';
+
+export type VaultSource = 'regex' | 'nano' | 'manual';
 
 export interface VaultEntry {
   token: string;
   category: PiiCategory;
   original: string;
+  source: VaultSource;
 }
+
+export interface TaggedSensitiveTerm {
+  text: string;
+  source: 'nano' | 'manual';
+  category?: PiiCategory;
+}
+
+export type SensitiveTermInput = string | TaggedSensitiveTerm;
 
 export interface CategoryBreakdown {
   category: PiiCategory;
   count: number;
+}
+
+export interface SourceCounts {
+  regex: number;
+  nano: number;
+  manual: number;
 }
 
 export interface RedactionResult {
@@ -25,6 +45,7 @@ export interface RedactionResult {
   bytesShielded: number;
   leaksFound: number;
   breakdown: CategoryBreakdown[];
+  sourceCounts: SourceCounts;
   privacyScore: number; // 0-100 risk exposure before shielding
   shieldTimeMs: number;
 }
@@ -39,6 +60,9 @@ export const DEFAULT_CATEGORY_FILTER: CategoryFilter = {
   PHONE: true,
   IP: true,
   PERSON: true,
+  ORG: true,
+  ADDRESS: true,
+  LOCATION: true,
   CUSTOM: true,
 };
 
@@ -98,16 +122,41 @@ const CATEGORY_WEIGHT: Record<PiiCategory, number> = {
   PHONE: 12,
   IP: 12,
   PERSON: 10,
+  ORG: 8,
+  ADDRESS: 12,
+  LOCATION: 8,
   CUSTOM: 10,
 };
+
+const EXISTING_TOKEN_SPAN_REGEX = /\[[A-Z]+_\d+\]/g;
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function getProtectedTokenSpans(text: string): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = [];
+  EXISTING_TOKEN_SPAN_REGEX.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = EXISTING_TOKEN_SPAN_REGEX.exec(text)) !== null) {
+    spans.push({ start: m.index, end: m.index + m[0].length });
+  }
+  return spans;
+}
+
+export function countVaultBySource(vault: VaultEntry[]): SourceCounts {
+  const counts: SourceCounts = { regex: 0, nano: 0, manual: 0 };
+  for (const entry of vault) {
+    if (entry.source === 'nano') counts.nano += 1;
+    else if (entry.source === 'manual') counts.manual += 1;
+    else counts.regex += 1;
+  }
+  return counts;
+}
+
 export function redactLocally(
   rawText: string,
-  extraSensitiveTerms: string[] = [],
+  extraSensitiveTerms: SensitiveTermInput[] = [],
   enabledCategories: CategoryFilter = DEFAULT_CATEGORY_FILTER,
   existingVault: VaultEntry[] = []
 ): RedactionResult {
@@ -115,11 +164,11 @@ export function redactLocally(
   let redacted = rawText;
 
   // Inherit existing vault entries & token counters so follow-up Q&A never collides with document tokens
-  const vault: VaultEntry[] = existingVault.map((e) => ({ ...e }));
+  const vault: VaultEntry[] = existingVault.map((e) => ({ ...e, source: e.source ?? 'regex' }));
   const seen = new Map<string, string>();
   const counters: Record<string, number> = {};
 
-  for (const entry of existingVault) {
+  for (const entry of vault) {
     seen.set(entry.original, entry.token);
     const numMatch = entry.token.match(/_(\d+)\]$/);
     if (numMatch) {
@@ -128,7 +177,7 @@ export function redactLocally(
     }
   }
 
-  const registerToken = (original: string, category: PiiCategory): string => {
+  const registerToken = (original: string, category: PiiCategory, source: VaultSource): string => {
     const trimmed = original.trim();
     if (!trimmed) return original;
     const existing = seen.get(trimmed);
@@ -136,7 +185,7 @@ export function redactLocally(
     counters[category] = (counters[category] || 0) + 1;
     const token = `[${category}_${counters[category]}]`;
     seen.set(trimmed, token);
-    vault.push({ token, category, original: trimmed });
+    vault.push({ token, category, original: trimmed, source });
     return token;
   };
 
@@ -145,21 +194,51 @@ export function redactLocally(
     rule.regex.lastIndex = 0;
     redacted = redacted.replace(rule.regex, (match) => {
       if (rule.validate && !rule.validate(match)) return match;
-      return registerToken(match, rule.category);
+      return registerToken(match, rule.category, 'regex');
     });
   }
 
-  if (enabledCategories.PERSON || enabledCategories.CUSTOM) {
-    const cleanExtras = extraSensitiveTerms
-      .map((t) => t.trim())
-      .filter((t) => t.length >= 3 && !t.startsWith('[') && !t.endsWith(']'))
-      .sort((a, b) => b.length - a.length);
+  if (
+    enabledCategories.PERSON ||
+    enabledCategories.ORG ||
+    enabledCategories.ADDRESS ||
+    enabledCategories.LOCATION ||
+    enabledCategories.CUSTOM
+  ) {
+    // Normalize string and tagged Nano/manual terms, keeping longest matches first
+    const normalizedTerms: Array<{ text: string; source: 'nano' | 'manual'; category: PiiCategory }> = [];
+    const dedup = new Set<string>();
 
-    for (const term of cleanExtras) {
-      const escaped = escapeRegExp(term);
-      // Case-insensitive match preserving exact matched text for lossless local re-hydration
+    for (const item of extraSensitiveTerms) {
+      const raw = typeof item === 'string' ? item : item.text;
+      const trimmed = raw.trim();
+      if (trimmed.length < 2 || trimmed.startsWith('[') || trimmed.endsWith(']')) continue;
+      const source: 'nano' | 'manual' = typeof item === 'string' ? 'manual' : item.source;
+      const category: PiiCategory =
+        typeof item === 'string' ? 'PERSON' : (item.category ?? (source === 'manual' ? 'CUSTOM' : 'PERSON'));
+      if (enabledCategories[category] === false) continue;
+
+      const key = trimmed.toLowerCase();
+      if (dedup.has(key)) continue;
+      dedup.add(key);
+      normalizedTerms.push({ text: trimmed, source, category });
+    }
+
+    normalizedTerms.sort((a, b) => b.text.length - a.text.length);
+
+    for (const term of normalizedTerms) {
+      const escaped = escapeRegExp(term.text);
       const rgx = new RegExp(escaped, 'gi');
-      redacted = redacted.replace(rgx, (matched) => registerToken(matched, 'PERSON'));
+      const tokenSpans = getProtectedTokenSpans(redacted);
+      // Case-insensitive match preserving exact matched text for lossless local re-hydration,
+      // while never corrupting already-inserted [TOKEN_N] placeholders.
+      redacted = redacted.replace(rgx, (matched, offset: number) => {
+        const end = offset + matched.length;
+        if (tokenSpans.some((s) => offset < s.end && end > s.start)) {
+          return matched;
+        }
+        return registerToken(matched, term.category, term.source);
+      });
     }
   }
 
@@ -180,6 +259,7 @@ export function redactLocally(
   const breakdown: CategoryBreakdown[] = Array.from(breakdownMap.entries()).map(
     ([category, count]) => ({ category, count })
   );
+  const sourceCounts = countVaultBySource(vault);
 
   const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - started;
 
@@ -189,6 +269,7 @@ export function redactLocally(
     bytesShielded,
     leaksFound,
     breakdown,
+    sourceCounts,
     privacyScore: Math.min(100, rawScore),
     shieldTimeMs: Number(elapsed.toFixed(2)),
   };
@@ -198,7 +279,10 @@ export function redactLocally(
  * Boundary-aware Zero-Leak check: avoids false positives when an IP like 1.2.3.4 is in the vault
  * and a version string like v1.2.3.4 or 1.2.3.4-rc1 legitimately remains in the text.
  */
-export function verifyZeroLeak(payload: string, vault: VaultEntry[]): number {
+export function verifyZeroLeak(
+  payload: string,
+  vault: Array<Pick<VaultEntry, 'token' | 'category' | 'original'>>
+): number {
   let leaks = 0;
   for (const entry of vault) {
     if (entry.original.length < 4) continue;
@@ -220,6 +304,32 @@ export function verifyZeroLeak(payload: string, vault: VaultEntry[]): number {
     }
   }
   return leaks;
+}
+
+export const GENERIC_TOKEN_REGEX = /\[[A-Z][A-Z0-9]*_\d+\]/g;
+
+export function findUnknownTokens(text: string, vault: VaultEntry[]): string[] {
+  const known = new Set(vault.map((v) => v.token));
+  const unknown = new Set<string>();
+  GENERIC_TOKEN_REGEX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = GENERIC_TOKEN_REGEX.exec(text)) !== null) {
+    if (!known.has(match[0])) {
+      unknown.add(match[0]);
+    }
+  }
+  return Array.from(unknown);
+}
+
+export function rehydrateWithAudit(
+  text: string,
+  vault: VaultEntry[]
+): { text: string; unknownTokens: string[] } {
+  const unknownTokens = findUnknownTokens(text, vault);
+  return {
+    text: rehydrateLocally(text, vault),
+    unknownTokens,
+  };
 }
 
 export function rehydrateLocally(text: string, vault: VaultEntry[]): string {

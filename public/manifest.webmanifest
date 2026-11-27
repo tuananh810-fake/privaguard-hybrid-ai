@@ -1,0 +1,18 @@
+{
+  "name": "PrivaGuard AI — Private Hybrid Document Workspace",
+  "short_name": "PrivaGuard AI",
+  "description": "Use cloud AI on confidential docs — secrets never leave your browser.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0F7B6C",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

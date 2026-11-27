@@ -1,52 +1,60 @@
-# Devpost Submission — PrivaGuard AI v5.0 (#BuildHybridAI 2026)
+# PrivaGuard AI (v6.0) — #BuildHybridAI 2026 Submission
 
-## Tagline
-Analyze confidential PDFs, DOCX files, logs, contracts, and images with Hybrid AI — while keeping 100% of your secrets and PII strictly on your device.
+> **Use cloud AI on confidential docs — secrets never leave your browser.**
 
-## Inspiration
-Every day, engineers paste incident logs containing live API keys into AI tools, clinicians summarize patient notes with SSNs, and founders review NDAs containing bank details or scanned IDs. Sending raw sensitive data to cloud LLMs creates immediate GDPR, HIPAA, and SOC2 exposure — yet purely on-device models lack deep structured reasoning for complex audits.
-
-We built **PrivaGuard AI (v5.0)** to prove **Hybrid AI** resolves this tradeoff cleanly: run deterministic + local OCR/document redaction strictly in browser RAM, send only anonymized tokens to **Firebase AI Logic** (Gemini Nano on-device or Gemini Cloud fallback), and re-hydrate real values locally on screen.
-
-## What it does
-1. **Zero-Leak On-Device Privacy Shield (`<1ms`)**: Detects and masks PEM private keys, JWTs, database URIs, API keys, credit cards/IBANs, SSNs, Vietnam 12-digit CCCD, VN/US phone numbers, valid IPv4 addresses (safely ignoring versions like `v1.2.3.4` and `1.2.3.4-rc1`), and case-insensitive custom terms.
-2. **Local PDF & DOCX Drag-and-Drop (v5.0)**: Extracts text from `.pdf` (up to 25 pages via `pdfjs-dist`) and `.docx` (`mammoth`) directly in browser RAM — original files never leave the device. Includes 1-click **Try sample PDF** and **Try sample image** buttons.
-3. **1-Click Auto-OCR Multimodal Image Redactor (v5.0)**: Runs lazy-loaded `tesseract.js` (`eng+vie`) + `ocrPiiMatcher` in-browser to auto-box PII on ID cards, receipts, and screenshots, then permanently flattens black `[HIDDEN]` bars and compresses to WebP locally.
-4. **Visual Privacy Proof & SHA-256 Export (v5.0)**: Side-by-side **Diff** tab proves `0B leaked` before inference; exported `.md` reports embed a `SHA-256` Zero-Leak proof footer.
-5. **Structured Security Audit via Firebase AI Logic (`responseSchema`)**: Uses `Schema.object(...)` on `gemini-3.6-flash` for a live Risk Score (`0–100`), compliance badges, and interactive remediation checklist — automatically falling back to `gemini-3.5-flash-lite` on HTTP 429 spikes and Markdown on Gemini Nano on-device.
-6. **Collision-Free Follow-up Q&A & Offline Simulation**: Follow-ups inherit the local RAM vault without token collisions; a 1-click **Offline · On-device** toggle lets judges test `ONLY_ON_DEVICE` Gemini Nano immediately.
-
-## How we built it
-- **Frontend**: React 19, TypeScript 7, Tailwind CSS v4, Vite 8 with a Notion-inspired Light/Dark UI (`--n-*` tokens) and dynamic `import()` for all heavy modules (`pdfjs-dist`, `mammoth`, `tesseract.js`, `firebase/firestore`, `firebase/auth`, `ImageRedactorModal`) to keep the initial JS bundle lean.
-- **Hybrid AI**: `firebase/ai` (`GoogleAIBackend`, `InferenceMode.PREFER_ON_DEVICE`, `ONLY_ON_DEVICE`, `PREFER_IN_CLOUD`, `ONLY_IN_CLOUD`, `Schema.object`, streaming TTFT telemetry, `AbortController` cancellation).
-- **Firebase Security & Ops**: App Check (reCAPTCHA Enterprise enforced), Remote Config (`cloud_model` + prompt style), Anonymous Auth + owner-only immutable `firestore.rules`, and Firebase Hosting.
-- **Privacy Model**: Document parsing, PII vaulting, Canvas redaction, and OCR run 100% in browser RAM/WASM. The Tesseract OCR language model (`eng+vie`) is downloaded once as a static asset; user images and text never leave the device.
-
-## Challenges
-- **Zero false-positive leaks**: Separating real IPv4 addresses and phone numbers from software versions (`v1.2.3.4`, `1.2.3.4-rc1`) and invalid dotted-quads (`999.999.999.999`) required boundary-aware regexes and token-boundary `verifyZeroLeak()`.
-- **Keeping initial load fast with PDF/DOCX/OCR**: Bundling `pdfjs-dist`, `mammoth`, and `tesseract.js` eagerly would bloat initial paint; we isolated every heavy engine behind dynamic `import()` and Vite worker URLs.
-- **Multi-turn token collisions**: Ensuring follow-up questions extend the active RAM vault cleanly so newly typed PII never overwrites document tokens.
-
-## Accomplishments
-- **10/10 automated unit tests passing** (`node:test`) covering PII shielding, edge cases, follow-up vault continuation, structured audit parsing, `eng+vie` OCR PII matching, and document classification.
-- **1,000-document concurrency stress test**: **297ms total (`0.297ms/doc`), 5,000 secrets shielded, 0 leaks, 0 re-hydration mismatches**.
-- **Clean production build**: `tsc --noEmit` 0 errors, `vite build` 0 warnings, and strict owner-scoped Firestore rules storing zero raw PII.
-
-## What we learned
-- Combining deterministic local shielding with Firebase AI Logic's Hybrid Nano/Cloud modes gives enterprises verifiable zero-leak guarantees without sacrificing structured reasoning quality.
-- Visual proof (side-by-side Diff, click-to-peek tokens, SHA-256 footer) matters as much as the underlying cryptography for building user and auditor trust.
-
-## What's next
-- Optional WebGPU local NER models for domain-specific entity extraction alongside Gemini Nano.
-- Team policy presets via Firebase Remote Config (HIPAA, PCI-DSS, SOC2 redaction profiles) and signed audit logs.
+**Live Demo:** https://buildhybridai-tuananh.web.app
+**Source Code:** https://github.com/tuananh810-fake/privaguard-hybrid-ai
 
 ---
 
-## 2-Minute Judge Walkthrough (4 "Aha!" Moments)
+## Inspiration
+Engineers, clinicians, lawyers, and founders want to use frontier cloud models on incident logs, patient notes, and NDAs — yet pasting raw API keys, national IDs (CCCD/SSN), IBANs, or client names into a cloud LLM violates SOC2, GDPR, HIPAA, and company security policies. Meanwhile, regex-only redactors miss free-form names and street addresses, and pure on-device models lack the reasoning depth of frontier cloud models for complex multi-framework security audits.
 
-| Time | Scene / Action | Key Proof Point |
-| :--- | :--- | :--- |
-| **0:00 – 0:30** | **1. Side-by-Side Diff + Payload Inspector**<br/>Open live app → select **DevOps log** → click **Diff** tab. | Raw secrets highlighted in red on the left vs. exact `[TOKEN_N]` cloud payload (`0B leaked`) on the right in `<1ms`. |
-| **0:30 – 1:05** | **2. Structured Audit JSON + Click-to-Peek**<br/>Press `Ctrl+Enter` → inspect Risk Score & remediation checklist → click `[SECRET_1]` to peek locally → export `.md`. | `gemini-3.6-flash` structured JSON via Firebase AI Logic + local RAM re-hydration + SHA-256 Zero-Leak proof footer. |
-| **1:05 – 1:35** | **3. Sample PDF + Auto-OCR Sample ID Image**<br/>Click **Try sample PDF** (parsed locally) → click **Try sample image** → click **Auto-detect PII (OCR)** → **Apply mask**. | 100% browser-side PDF extraction and 1-click `tesseract.js` (`eng+vie`) auto-redaction flattened to WebP. |
-| **1:35 – 2:00** | **4. Offline Simulation → On-Device Gemini Nano**<br/>Click **Offline · On-device** in topbar → open **Settings** drawer → save anonymized report to Firestore. | Forces `ONLY_ON_DEVICE` Gemini Nano via Firebase AI Logic; App Check enforced; zero raw PII stored in Firestore. |
+We built **PrivaGuard AI** so **on-device Gemini Nano and Cloud Gemini work together as one true hybrid pipeline**: Nano discovers semantic PII locally before anything leaves the browser, while Cloud Gemini reasons exclusively over safe placeholder tokens.
+
+## What it does
+PrivaGuard AI is a calm, Notion-style Hybrid AI workspace where **0 detected PII is sent to the cloud**:
+
+1. **Three-layer local PII shielding (with source provenance):**
+   - **Regex layer (< 1 ms):** Catches structured secrets (JWT, PEM keys, DB URIs, API keys), cards/IBANs, SSNs/Vietnam 12-digit CCCDs, emails, phones, and valid IPv4s (`source: regex`).
+   - **Gemini Nano semantic discovery (`InferenceMode.ONLY_ON_DEVICE`):** Runs locally (5 s timeout + `AbortController`, verbatim anti-hallucination filter, regex span deduplication) to detect free-form `PERSON`, `ORG`, `ADDRESS`, and `LOCATION` entities — including Vietnamese diacritics (`source: Nano`).
+   - **Human-in-the-loop (`Mark as sensitive`, `Ctrl/Cmd+Shift+M`):** Highlight any confidential phrase or project codename to mask it instantly (`source: manual`).
+2. **Local PDF/DOCX & Auto-OCR image redaction:** Drop `.pdf` (up to 25 pages via `pdfjs-dist`), `.docx` (`mammoth`), or images (`tesseract.js` `eng+vie` auto-OCR) — all extracted and masked strictly in browser RAM. Includes 1-click **Try sample PDF** and **Try sample image** buttons.
+3. **Transparent Hybrid execution & metrics:** Clearly reports Nano readiness (or a dismissible setup banner), labels every output `Ran on: Device (Nano)` or `Ran on: Cloud (<model>)`, and renders a per-run **Hybrid Metrics Strip** (`Engine · Latency · TTFT · Masked rx/Na/man · Bytes to cloud · Raw PII bytes sent: 0 B`).
+4. **Structured Security Audits & Safe Re-hydration:** Generates typed JSON risk cards (`riskLevel`, `riskScore`, `complianceFrameworks`, `findings`, interactive checklist) with click-to-peek local vault lookup, `unknown token` chips for hallucinated placeholders, SHA-256 Markdown proofs, and offline-capable PWA app shell.
+
+## How we built it
+- **Frontend & PWA:** React 19, TypeScript, Vite 8, Tailwind CSS v4 (Notion Light/Dark CSS tokens `--n-*`), and a hand-written Service Worker (`public/sw.js` + `manifest.webmanifest`) that caches the app shell and hashed chunks while strictly excluding Firebase/Google/reCAPTCHA APIs.
+- **Hybrid AI & Firebase:** Firebase 13 (`firebase/ai`) routing between Chrome's built-in **Gemini Nano** (`ONLY_ON_DEVICE` semantic discovery + offline inference) and **Gemini 3.6 Flash** (with automatic `gemini-3.5-flash-lite` fallback on rate limits), managed dynamically via **Firebase Remote Config**, protected by **Firebase App Check (reCAPTCHA Enterprise)**, and persisted as anonymized owner-only snapshots in **Cloud Firestore** with **Firebase Anonymous Auth**.
+- **Zero-bloat performance:** `nanoEntityDiscovery`, `pdfjs-dist`, `mammoth`, `tesseract.js`, `ImageRedactorModal`, and `historyStore` are all dynamically imported so the initial `index.js` bundle stays lean (`50.09 kB` gzip).
+
+## Challenges we ran into
+- **Preventing LLM hallucinations during local entity extraction:** Small on-device models can occasionally invent entities or emit broken JSON. We added a strict verbatim substring verifier, span-overlap deduplicator against regex matches, 5 s timeout + `AbortController`, and silent graceful fallback to `[]`.
+- **Avoiding false positives & prompt-injection myths:** Early regex rules tripped on software versions (`v1.2.3.4`, `1.2.3.4-rc1`) and invalid dotted-quads (`999.999.999.999`). We built a 52-sample EN+VI accuracy benchmark with 11 decoy traps and an automated prompt-injection test proving the local RAM vault is never serialized into cloud payloads.
+- **Honest privacy boundaries:** Instead of claiming "100% absolute zero-leak", we clearly communicate `"0 detected PII sent to cloud"` and remind users that detection = regex + on-device Nano + manual marks.
+
+## Accomplishments that we're proud of
+- **13/13 unit tests passing** (`node:test`), including Nano anti-hallucination filtering, unknown-token re-hydration auditing, prompt-injection defense, and `eng+vie` OCR bounding-box matching.
+- **Measured regex accuracy:** **100.0% Precision · 97.8% Recall · 98.9% F1** across 52 synthetic EN+VI samples with **11/11 decoy traps rejected** (`scripts/eval-pii.ts`).
+- **High-throughput local vault:** 1,000 concurrent documents shielded and re-hydrated in **255 ms** (`0.255 ms/doc`, 5,000 secrets, 0 detected leaks, 0 mismatches).
+- **Lean bundle:** Initial JS stayed at **50.09 kB gzip** despite adding semantic Nano discovery, PDF/DOCX parsing, `eng+vie` OCR, and PWA offline support.
+
+## What we learned
+- Hybrid AI shines brightest when **on-device and cloud models have complementary roles** (Nano handles private local semantic discovery; Cloud handles complex structured reasoning over tokens) rather than merely acting as an online/offline fallback switch.
+- Honest security communication — showing exact source badges (`regex` / `Nano` / `manual`), per-run cloud byte counts, and measured Precision/Recall — earns far more trust than absolute marketing claims.
+
+## What's next
+- Optional WebGPU/ONNX NER fallback for browsers without Chrome's Prompt API so non-Chrome users also get on-device semantic PII discovery.
+- Team policy packs distributed via Firebase Remote Config (custom industry regexes for HIPAA, PCI-DSS, and Vietnam PDPD Decree 13).
+- Exportable signed audit certificates for enterprise compliance pipelines.
+
+---
+
+## 2-Minute Judge Demo Script (4 Aha Moments)
+
+| Timestamp | Aha Moment | What Judges See |
+|---|---|---|
+| **0:00 – 0:30** | **1. Hybrid Semantic Masking & Source Provenance** | Open **Diff** & **Payload**: token chips display `regex`, `Nano`, and `manual` tags; highlight a word and press `Ctrl/Cmd+Shift+M` (`Mark as sensitive`); verify `0 detected PII sent to cloud`. |
+| **0:30 – 1:05** | **2. Structured Audit + Local Peek + Hybrid Metrics** | Click **Analyze safely** → typed JSON risk card renders with `Ran on: Cloud (gemini-3.6-flash)`, click any token chip to peek real values locally, inspect the **Hybrid Metrics Strip** (`Engine · Latency · TTFT · Masked rx/Na/man · Bytes to cloud · Raw PII bytes sent: 0 B`). |
+| **1:05 – 1:35** | **3. 1-Click Sample PDF & Auto-OCR Image Masking** | Click **Try sample PDF** (2-page NDA parsed in RAM) → click **Try sample image** (synthetic ID card) → **Auto-detect PII** (`eng+vie` OCR masks ID, phone, and email locally). |
+| **1:35 – 2:00** | **4. True Offline PWA → On-Device Gemini Nano** | Disconnect network / enable **Offline** → PWA Service Worker still opens the app shell and routes analysis to **Device (Nano)** with **0 B sent to cloud**. |

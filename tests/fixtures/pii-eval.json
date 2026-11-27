@@ -1,0 +1,322 @@
+[
+  {
+    "id": "email-01",
+    "lang": "en",
+    "text": "Send the incident report to secops-team@novagrid-demo.io before 5 PM.",
+    "expected": [{ "category": "EMAIL", "value": "secops-team@novagrid-demo.io" }]
+  },
+  {
+    "id": "email-02",
+    "lang": "vi",
+    "text": "Vui lòng gửi hợp đồng về địa chỉ minh.anh+legal@congty-demo.vn hôm nay.",
+    "expected": [{ "category": "EMAIL", "value": "minh.anh+legal@congty-demo.vn" }]
+  },
+  {
+    "id": "email-03",
+    "lang": "en",
+    "text": "CC billing_alerts@acme-pay.co.uk and finance@acme-pay.co.uk for payout.",
+    "expected": [
+      { "category": "EMAIL", "value": "billing_alerts@acme-pay.co.uk" },
+      { "category": "EMAIL", "value": "finance@acme-pay.co.uk" }
+    ]
+  },
+  {
+    "id": "email-04",
+    "lang": "vi",
+    "text": "Email hỗ trợ khách hàng: hotro.khachhang@fintech-demo.com.vn.",
+    "expected": [{ "category": "EMAIL", "value": "hotro.khachhang@fintech-demo.com.vn" }]
+  },
+  {
+    "id": "email-05",
+    "lang": "en",
+    "text": "Escalation mailbox: oncall.24x7@cloud-infra.dev (tier-1).",
+    "expected": [{ "category": "EMAIL", "value": "oncall.24x7@cloud-infra.dev" }]
+  },
+  {
+    "id": "email-06",
+    "lang": "en",
+    "text": "Reply directly to dr.sarah.k@metroclinic-demo.org with lab summary.",
+    "expected": [{ "category": "EMAIL", "value": "dr.sarah.k@metroclinic-demo.org" }]
+  },
+  {
+    "id": "phone-01",
+    "lang": "vi",
+    "text": "Số điện thoại liên hệ khẩn cấp: 0912 345 678 (gặp phòng kỹ thuật).",
+    "expected": [{ "category": "PHONE", "value": "0912 345 678" }]
+  },
+  {
+    "id": "phone-02",
+    "lang": "vi",
+    "text": "Hotline quốc tế Việt Nam: +84 912-345-679 hoạt động 24/7.",
+    "expected": [{ "category": "PHONE", "value": "+84 912-345-679" }]
+  },
+  {
+    "id": "phone-03",
+    "lang": "vi",
+    "text": "Gọi trực tiếp số 0987.654.321 để xác nhận đơn.",
+    "expected": [{ "category": "PHONE", "value": "0987.654.321" }]
+  },
+  {
+    "id": "phone-04",
+    "lang": "vi",
+    "text": "SĐT nội bộ không dấu cách: 0356789012.",
+    "expected": [{ "category": "PHONE", "value": "0356789012" }]
+  },
+  {
+    "id": "phone-05",
+    "lang": "en",
+    "text": "US office desk phone: (415) 555-0192 ext 4.",
+    "expected": [{ "category": "PHONE", "value": "(415) 555-0192" }]
+  },
+  {
+    "id": "phone-06",
+    "lang": "en",
+    "text": "Pager alert SMS number +1-650-555-0148 triggered.",
+    "expected": [{ "category": "PHONE", "value": "+1-650-555-0148" }]
+  },
+  {
+    "id": "phone-07",
+    "lang": "en",
+    "text": "Call security desk at 212-555-0188 immediately.",
+    "expected": [{ "category": "PHONE", "value": "212-555-0188" }]
+  },
+  {
+    "id": "phone-08",
+    "lang": "vi",
+    "text": "Máy bàn văn phòng TP.HCM: 028-3822-1234.",
+    "expected": [{ "category": "PHONE", "value": "028-3822-1234" }]
+  },
+  {
+    "id": "id-01",
+    "lang": "vi",
+    "text": "Số căn cước công dân: 079092004812 cấp ngày 10/05/2022.",
+    "expected": [{ "category": "ID", "value": "079092004812" }]
+  },
+  {
+    "id": "id-02",
+    "lang": "vi",
+    "text": "Hồ sơ định danh CCCD: 001095008741 đã được đối chiếu.",
+    "expected": [{ "category": "ID", "value": "CCCD: 001095008741" }]
+  },
+  {
+    "id": "id-03",
+    "lang": "vi",
+    "text": "Thông tin cũ CMND 024567891 cần cập nhật.",
+    "expected": [{ "category": "ID", "value": "CMND 024567891" }]
+  },
+  {
+    "id": "id-04",
+    "lang": "en",
+    "text": "Employee tax record SSN 123-45-6789 stored in HR vault.",
+    "expected": [{ "category": "ID", "value": "123-45-6789" }]
+  },
+  {
+    "id": "id-05",
+    "lang": "en",
+    "text": "Patient chart MRN: 8842109 admitted for observation.",
+    "expected": [{ "category": "ID", "value": "MRN: 8842109" }]
+  },
+  {
+    "id": "id-06",
+    "lang": "en",
+    "text": "Lab sample linked to PID-774512 in staging database.",
+    "expected": [{ "category": "ID", "value": "PID-774512" }]
+  },
+  {
+    "id": "id-07",
+    "lang": "vi",
+    "text": "Mã công dân 079200012345 thuộc chi nhánh phía Nam.",
+    "expected": [{ "category": "ID", "value": "079200012345" }]
+  },
+  {
+    "id": "card-01",
+    "lang": "en",
+    "text": "Corporate card 4532-8810-2294-7710 charged for cloud bill.",
+    "expected": [{ "category": "CARD", "value": "4532-8810-2294-7710" }]
+  },
+  {
+    "id": "card-02",
+    "lang": "vi",
+    "text": "Số thẻ thanh toán 5412 7512 3412 3456 đã tạm khóa.",
+    "expected": [{ "category": "CARD", "value": "5412 7512 3412 3456" }]
+  },
+  {
+    "id": "card-03",
+    "lang": "en",
+    "text": "Wire transfer to IBAN DE89370400440532013000 by Friday.",
+    "expected": [{ "category": "CARD", "value": "DE89370400440532013000" }]
+  },
+  {
+    "id": "card-04",
+    "lang": "en",
+    "text": "UK settlement account GB29NWBK60161331926819 verified.",
+    "expected": [{ "category": "CARD", "value": "GB29NWBK60161331926819" }]
+  },
+  {
+    "id": "card-05",
+    "lang": "en",
+    "text": "French vendor IBAN FR7630006000011234567890189 approved.",
+    "expected": [{ "category": "CARD", "value": "FR7630006000011234567890189" }]
+  },
+  {
+    "id": "card-06",
+    "lang": "en",
+    "text": "Compact PAN string 4111222233334444 found in debug trace.",
+    "expected": [{ "category": "CARD", "value": "4111222233334444" }]
+  },
+  {
+    "id": "secret-01",
+    "lang": "en",
+    "text": "Webhook sandbox secret: sk_test_demo99482716540192837465abcd",
+    "expected": [{ "category": "SECRET", "value": "sk_test_demo99482716540192837465abcd" }]
+  },
+  {
+    "id": "secret-02",
+    "lang": "en",
+    "text": "Publishable sandbox key pk_test_demo11223344556677889900aabb committed.",
+    "expected": [{ "category": "SECRET", "value": "pk_test_demo11223344556677889900aabb" }]
+  },
+  {
+    "id": "secret-03",
+    "lang": "en",
+    "text": "Authorization: Bearer synthetic_demo_token_998877665544332211",
+    "expected": [{ "category": "SECRET", "value": "Bearer synthetic_demo_token_998877665544332211" }]
+  },
+  {
+    "id": "secret-04",
+    "lang": "en",
+    "text": "Session JWT eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZW1vLTAwMSIsInJvbGUiOiJ0ZXN0In0.syntheticSignatureValue1234567890 logged.",
+    "expected": [{ "category": "SECRET", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZW1vLTAwMSIsInJvbGUiOiJ0ZXN0In0.syntheticSignatureValue1234567890" }]
+  },
+  {
+    "id": "secret-05",
+    "lang": "en",
+    "text": "DATABASE_URL=postgresql://demo_user:demoPass123@db.internal.test:5432/staging",
+    "expected": [{ "category": "SECRET", "value": "postgresql://demo_user:demoPass123@db.internal.test:5432/staging" }]
+  },
+  {
+    "id": "secret-06",
+    "lang": "en",
+    "text": "MONGO_URI=mongodb+srv://app_demo:syntheticPwd99@cluster0.internal.test/app",
+    "expected": [{ "category": "SECRET", "value": "mongodb+srv://app_demo:syntheticPwd99@cluster0.internal.test/app" }]
+  },
+  {
+    "id": "secret-07",
+    "lang": "en",
+    "text": "Key dump:\n-----BEGIN PRIVATE KEY-----\nSYNTHETIC_DEMO_KEY_PAYLOAD_ONLY_0001\n-----END PRIVATE KEY-----",
+    "expected": [{ "category": "SECRET", "value": "-----BEGIN PRIVATE KEY-----\nSYNTHETIC_DEMO_KEY_PAYLOAD_ONLY_0001\n-----END PRIVATE KEY-----" }]
+  },
+  {
+    "id": "ip-01",
+    "lang": "en",
+    "text": "Primary database replica running on 10.42.18.94 inside VPC.",
+    "expected": [{ "category": "IP", "value": "10.42.18.94" }]
+  },
+  {
+    "id": "ip-02",
+    "lang": "en",
+    "text": "Bastion endpoint 192.168.1.50:8443 rejected TLS handshake.",
+    "expected": [{ "category": "IP", "value": "192.168.1.50:8443" }]
+  },
+  {
+    "id": "ip-03",
+    "lang": "en",
+    "text": "Ingress NAT gateway 172.16.0.12 forwarded traffic.",
+    "expected": [{ "category": "IP", "value": "172.16.0.12" }]
+  },
+  {
+    "id": "ip-04",
+    "lang": "vi",
+    "text": "Địa chỉ IP máy chủ đặt tại Hà Nội là 203.113.152.10.",
+    "expected": [{ "category": "IP", "value": "203.113.152.10" }]
+  },
+  {
+    "id": "ip-05",
+    "lang": "en",
+    "text": "Secondary node 10.0.0.5:5432 is syncing WAL segments.",
+    "expected": [{ "category": "IP", "value": "10.0.0.5:5432" }]
+  },
+  {
+    "id": "ip-06",
+    "lang": "en",
+    "text": "Fallback DNS probe sent to 8.8.4.4 during outage.",
+    "expected": [{ "category": "IP", "value": "8.8.4.4" }]
+  },
+  {
+    "id": "mixed-01",
+    "lang": "vi",
+    "text": "Liên hệ admin@demo-vn.io hoặc 0912 345 678, máy chủ 10.10.20.30, CCCD 079091002233.",
+    "expected": [
+      { "category": "EMAIL", "value": "admin@demo-vn.io" },
+      { "category": "PHONE", "value": "0912 345 678" },
+      { "category": "IP", "value": "10.10.20.30" },
+      { "category": "ID", "value": "079091002233" }
+    ]
+  },
+  {
+    "id": "decoy-01",
+    "lang": "en",
+    "text": "Deployed release v1.2.3.4 and tested candidate 1.2.3.4-rc1 on staging.",
+    "expected": []
+  },
+  {
+    "id": "decoy-02",
+    "lang": "en",
+    "text": "Invalid dotted-quad 999.999.999.999 and 300.400.500.600 are parser test strings.",
+    "expected": []
+  },
+  {
+    "id": "decoy-03",
+    "lang": "en",
+    "text": "Order ORD-2026-88412 and Invoice INV-90421 settled for $1,250,000.00.",
+    "expected": []
+  },
+  {
+    "id": "decoy-04",
+    "lang": "vi",
+    "text": "Đơn hàng DH-2026-45210 tổng tiền 450,000 VND đã giao thành công.",
+    "expected": []
+  },
+  {
+    "id": "decoy-05",
+    "lang": "en",
+    "text": "Pre-release build 3.4.5.6-beta.2 passed 99.95% uptime SLA check.",
+    "expected": []
+  },
+  {
+    "id": "decoy-06",
+    "lang": "en",
+    "text": "Ticket #44210 tracked under sprint 2026-Q4 for ISO 27001 readiness.",
+    "expected": []
+  },
+  {
+    "id": "decoy-07",
+    "lang": "vi",
+    "text": "Báo cáo doanh thu quý 4 năm 2026 tăng 18.5% so với cùng kỳ năm ngoái.",
+    "expected": []
+  },
+  {
+    "id": "decoy-08",
+    "lang": "en",
+    "text": "HTTP 200 OK returned on port 8080 after 142ms according to RFC 7519.",
+    "expected": []
+  },
+  {
+    "id": "decoy-09",
+    "lang": "en",
+    "text": "Warehouse batch BATCH-2026-Q4 and product SKU-48291-VN passed QA.",
+    "expected": []
+  },
+  {
+    "id": "decoy-10",
+    "lang": "en",
+    "text": "Timestamp 2026-11-27 14:30:00 UTC logged 0 errors across 5000 requests.",
+    "expected": []
+  },
+  {
+    "id": "decoy-11",
+    "lang": "vi",
+    "text": "Phiên bản phần mềm v2.14.0 hỗ trợ giao diện sáng và tối tối giản.",
+    "expected": []
+  }
+]

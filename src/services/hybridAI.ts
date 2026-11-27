@@ -397,6 +397,13 @@ export async function generateFollowUpStream(
   );
 }
 
+export function createOnDeviceNanoModel() {
+  return getGenerativeModel(ai, {
+    model: 'gemini-3.6-flash',
+    mode: InferenceMode.ONLY_ON_DEVICE,
+  });
+}
+
 export async function detectEntitiesOnDevice(rawText: string): Promise<{
   entities: string[];
   usedOnDeviceAI: boolean;

@@ -43,6 +43,9 @@ interface DocumentInputPanelProps {
   vaultLookup: Record<string, VaultEntry>;
   leakCheck: number;
   outgoingPrompt: string;
+  manualTerms: string[];
+  onAddManualTerm: (term: string) => void;
+  onRemoveManualTerm: (term: string) => void;
   attachedImage: AttachedImage | null;
   imageMaskCount: number;
   onOpenImageRedactor: () => void;
@@ -112,6 +115,9 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     vaultLookup,
     leakCheck,
     outgoingPrompt,
+    manualTerms,
+    onAddManualTerm,
+    onRemoveManualTerm,
     attachedImage,
     imageMaskCount,
     onOpenImageRedactor,
@@ -124,11 +130,48 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
   }) => {
     const textFileRef = useRef<HTMLInputElement>(null);
     const imageFileRef = useRef<HTMLInputElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const attachMenuRef = useRef<HTMLDivElement>(null);
     const dragDepthRef = useRef(0);
     const [attachMenuOpen, setAttachMenuOpen] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
     const [loadingSample, setLoadingSample] = useState<'pdf' | 'image' | null>(null);
+    const [selectedText, setSelectedText] = useState('');
+
+    function syncSelection() {
+      const el = textareaRef.current;
+      if (!el) return;
+      const start = el.selectionStart ?? 0;
+      const end = el.selectionEnd ?? 0;
+      if (end > start) {
+        const picked = el.value.slice(start, end).trim();
+        setSelectedText(picked.length >= 2 && picked.length <= 80 ? picked : '');
+      } else {
+        setSelectedText('');
+      }
+    }
+
+    function handleMarkSelectedAsSensitive() {
+      if (!selectedText) return;
+      onAddManualTerm(selectedText);
+      setSelectedText('');
+    }
+
+    function handleTextareaKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        const el = e.currentTarget;
+        const start = el.selectionStart ?? 0;
+        const end = el.selectionEnd ?? 0;
+        if (end > start) {
+          const picked = el.value.slice(start, end).trim();
+          if (picked.length >= 2 && picked.length <= 80) {
+            onAddManualTerm(picked);
+            setSelectedText('');
+          }
+        }
+      }
+    }
 
     async function handleLoadSampleFile(kind: 'pdf' | 'image') {
       if (loadingSample || extractingFile) return;
@@ -331,10 +374,15 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
             </button>
             <span className="ml-1 hidden items-center gap-1 text-[12px] text-[var(--n-accent)] sm:inline-flex">
               <CheckCircle2 className="h-3.5 w-3.5" />
-              {leakCheck === 0 ? '0 leaks' : `${leakCheck} leaks`}
+              {leakCheck === 0 ? '0 detected PII sent to cloud' : `${leakCheck} detected PII remaining`}
             </span>
           </div>
         </div>
+
+        {/* Honest detection scope note */}
+        <p className="mb-2 text-[11.5px] text-[var(--n-muted)]">
+          Detection = regex + on-device Nano + your manual marks; review the Diff before sending.
+        </p>
 
         {/* Local Extraction Status / Meta Line */}
         {extractingFile && (
@@ -367,13 +415,61 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
         {/* Clean Notion Editorial Surface */}
         <div className="flex flex-1 flex-col">
           {inputTab === 'original' ? (
-            <textarea
-              value={rawText}
-              onChange={(e) => onRawTextChange(e.target.value)}
-              rows={13}
-              placeholder="Paste text or drop a PDF, Word (.docx), log file, or image here. Everything is processed 100% on this device..."
-              className="w-full flex-1 resize-none bg-transparent py-2 text-[14.5px] leading-[1.65] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none"
-            />
+            <div className="flex flex-1 flex-col">
+              {selectedText && (
+                <div className="mb-1.5 flex items-center justify-between gap-2 rounded-md border border-[var(--n-accent-border)] bg-[var(--n-accent-soft)] px-2.5 py-1 text-[12px]">
+                  <span className="truncate text-[var(--n-text)]">
+                    Selected: <code className="font-mono">&ldquo;{selectedText}&rdquo;</code>
+                  </span>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={handleMarkSelectedAsSensitive}
+                    aria-label={`Mark "${selectedText}" as sensitive`}
+                    title="Shortcut: Ctrl/Cmd + Shift + M"
+                    className="shrink-0 rounded px-2 py-0.5 font-medium text-[var(--n-accent)] transition hover:bg-[var(--n-bg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)]"
+                  >
+                    Mark as sensitive <span className="ml-1 font-mono text-[10.5px] opacity-75">⇧⌘M</span>
+                  </button>
+                </div>
+              )}
+              <textarea
+                ref={textareaRef}
+                value={rawText}
+                onChange={(e) => onRawTextChange(e.target.value)}
+                onSelect={syncSelection}
+                onKeyUp={syncSelection}
+                onMouseUp={syncSelection}
+                onKeyDown={handleTextareaKeyDown}
+                rows={13}
+                placeholder="Paste text or drop a PDF, Word (.docx), log file, or image here. Highlight any word and press Ctrl/Cmd+Shift+M to mark it sensitive..."
+                className="w-full flex-1 resize-none bg-transparent py-2 text-[14.5px] leading-[1.65] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none"
+              />
+              {manualTerms.length > 0 && (
+                <div
+                  aria-label="Manually marked sensitive terms"
+                  className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-[var(--n-border)] pt-2 text-[11.5px]"
+                >
+                  <span className="text-[var(--n-muted)]">Marked sensitive:</span>
+                  {manualTerms.map((term) => (
+                    <span
+                      key={term}
+                      className="inline-flex items-center gap-1 rounded border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-0.5 text-[var(--n-text)]"
+                    >
+                      <span>{term}</span>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveManualTerm(term)}
+                        aria-label={`Remove marked term ${term}`}
+                        className="rounded p-0.5 text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-danger)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)]"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : inputTab === 'safe' ? (
             <div className="flex-1 overflow-y-auto py-2 text-[14.5px] leading-[1.65] text-[var(--n-text)]">
               <p className="mb-3 text-[12.5px] text-[var(--n-muted)]">
@@ -393,10 +489,15 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                 <HighlightedRawPii rawText={rawText} vault={redaction.vault} />
               </div>
               <div className="overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 text-[13.5px] leading-relaxed">
-                <div className="mb-2 flex items-center justify-between text-[12px] font-medium text-[var(--n-muted)]">
-                  <span>Sent to AI</span>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-1 text-[12px] font-medium text-[var(--n-muted)]">
+                  <span>
+                    Sent to AI{' '}
+                    <span className="font-mono text-[11px] font-normal">
+                      (regex {redaction.sourceCounts.regex} · Nano {redaction.sourceCounts.nano} · manual {redaction.sourceCounts.manual})
+                    </span>
+                  </span>
                   <span className="font-mono tabular-nums text-[var(--n-accent)]">
-                    {leakCheck === 0 ? '0B leaked' : `${leakCheck} leaks`}
+                    {leakCheck === 0 ? '0 detected PII sent to cloud' : `${leakCheck} remaining`}
                   </span>
                 </div>
                 <HighlightedRedactedText text={redaction.redactedText} vaultLookup={vaultLookup} />
@@ -404,8 +505,11 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 font-mono text-[12px] leading-relaxed text-[var(--n-text)]">
-              <div className="mb-2 font-sans text-[12px] font-medium text-[var(--n-muted)]">
-                Exact network payload (0 private bytes included):
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 font-sans text-[12px] font-medium text-[var(--n-muted)]">
+                <span>Exact network payload (0 detected PII included):</span>
+                <span className="rounded bg-[var(--n-bg)] px-2 py-0.5 text-[11px] text-[var(--n-text)]">
+                  {redaction.sourceCounts.nano} {redaction.sourceCounts.nano === 1 ? 'entity' : 'entities'} found on-device by Gemini Nano
+                </span>
               </div>
               <pre className="whitespace-pre-wrap">{outgoingPrompt}</pre>
             </div>

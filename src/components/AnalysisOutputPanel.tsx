@@ -24,11 +24,19 @@ import {
   HybridResponse,
   StructuredAuditReport,
 } from '../services/hybridAI';
-import { rehydrateLocally, VaultEntry } from '../services/piiVault';
+import { rehydrateLocally, SourceCounts, VaultEntry } from '../services/piiVault';
 import { HighlightedRedactedText, RichOutput } from './RichOutput';
+
+export interface RunMetrics {
+  sourceCounts: SourceCounts;
+  bytesSentToCloud: number;
+  rawPiiBytesSent: number;
+  shieldTimeMs: number;
+}
 
 interface AnalysisOutputPanelProps {
   result: HybridResponse | null;
+  runMetrics: RunMetrics | null;
   displayedMarkdown: string;
   running: boolean;
   errorMsg: string | null;
@@ -49,6 +57,14 @@ interface AnalysisOutputPanelProps {
   followUpStreaming: string;
   followUpRunning: boolean;
   onSendFollowUp: (question: string) => void;
+}
+
+function formatEngineLabel(result: HybridResponse): string {
+  if (result.inferenceSource === 'ON_DEVICE') {
+    return 'Ran on: Device (Nano)';
+  }
+  const cleanModel = result.modelUsed.replace(/\s*\(Cloud\)\s*$/i, '').trim() || 'gemini-3.6-flash';
+  return `Ran on: Cloud (${cleanModel})`;
 }
 
 const SEVERITY_BADGE: Record<string, string> = {
@@ -229,6 +245,7 @@ FollowUpThread.displayName = 'FollowUpThread';
 export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
   ({
     result,
+    runMetrics,
     displayedMarkdown,
     running,
     errorMsg,
@@ -274,16 +291,13 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
 
           {result && (
             <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--n-muted)]">
-              <span className="inline-flex items-center gap-1 rounded-md bg-[var(--n-surface)] px-2 py-0.5 text-[var(--n-text)]">
+              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-0.5 font-medium text-[var(--n-text)]">
                 {result.inferenceSource === 'ON_DEVICE' ? (
                   <Cpu className="h-3.5 w-3.5 text-[var(--n-accent)]" />
                 ) : (
                   <Cloud className="h-3.5 w-3.5 text-[var(--n-accent)]" />
                 )}
-                {result.inferenceSource === 'ON_DEVICE' ? 'On-device Nano' : 'Cloud Gemini'}
-              </span>
-              <span className="font-mono tabular-nums">
-                Shield {shieldTimeMs < 1 ? '<1ms' : `${shieldTimeMs}ms`} · AI {result.latencyMs}ms
+                {formatEngineLabel(result)}
               </span>
               {result.cached && (
                 <span className="rounded bg-[var(--n-accent-soft)] px-1.5 py-0.5 text-[var(--n-accent)]">
@@ -298,6 +312,65 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
             </div>
           )}
         </div>
+
+        {/* Compact Hybrid Per-Run Metrics Strip */}
+        {result && runMetrics && (
+          <div
+            aria-label="Hybrid run metrics"
+            className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3.5 py-2.5 text-[12px] sm:grid-cols-3 xl:grid-cols-6"
+          >
+            <div>
+              <div className="text-[11px] text-[var(--n-muted)]">Engine</div>
+              <div className="truncate font-medium text-[var(--n-text)]">
+                {result.inferenceSource === 'ON_DEVICE'
+                  ? 'Device (Nano)'
+                  : result.modelUsed.replace(/\s*\(Cloud\)\s*$/i, '').trim()}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-[var(--n-muted)]">Latency</div>
+              <div className="font-mono font-medium tabular-nums text-[var(--n-text)]">
+                {result.latencyMs} ms
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-[var(--n-muted)]">TTFT</div>
+              <div className="font-mono font-medium tabular-nums text-[var(--n-text)]">
+                {result.ttftMs} ms
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-[var(--n-muted)]">Masked (rx/Na/man)</div>
+              <div
+                title={`regex: ${runMetrics.sourceCounts.regex}, Nano: ${runMetrics.sourceCounts.nano}, manual: ${runMetrics.sourceCounts.manual} (local shield ${shieldTimeMs < 1 ? '<1ms' : `${shieldTimeMs}ms`})`}
+                className="font-mono font-medium tabular-nums text-[var(--n-text)]"
+              >
+                {runMetrics.sourceCounts.regex +
+                  runMetrics.sourceCounts.nano +
+                  runMetrics.sourceCounts.manual}{' '}
+                <span className="text-[11px] font-normal text-[var(--n-muted)]">
+                  ({runMetrics.sourceCounts.regex}/{runMetrics.sourceCounts.nano}/{runMetrics.sourceCounts.manual})
+                </span>
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-[var(--n-muted)]">Bytes to cloud</div>
+              <div className="font-mono font-medium tabular-nums text-[var(--n-text)]">
+                {runMetrics.bytesSentToCloud.toLocaleString()} B
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-[var(--n-muted)]">Raw PII bytes sent</div>
+              <div
+                className={`font-mono font-medium tabular-nums ${
+                  runMetrics.rawPiiBytesSent === 0 ? 'text-[var(--n-accent)]' : 'text-[var(--n-danger)]'
+                }`}
+              >
+                {runMetrics.rawPiiBytesSent} B
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Error Callout */}
         {errorMsg && (
