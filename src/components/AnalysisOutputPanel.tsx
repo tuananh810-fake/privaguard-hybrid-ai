@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   FileWarning,
+  Lock,
   RefreshCw,
   Save,
   Send,
@@ -32,11 +33,16 @@ export interface RunMetrics {
   bytesSentToCloud: number;
   rawPiiBytesSent: number;
   shieldTimeMs: number;
+  sentPayloadText: string;
+  sentVaultCount: number;
+  sentBytesShielded: number;
+  sentLeakCount: number;
 }
 
 interface AnalysisOutputPanelProps {
   result: HybridResponse | null;
   runMetrics: RunMetrics | null;
+  isHistoricalView: boolean;
   displayedMarkdown: string;
   running: boolean;
   errorMsg: string | null;
@@ -246,6 +252,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
   ({
     result,
     runMetrics,
+    isHistoricalView,
     displayedMarkdown,
     running,
     errorMsg,
@@ -268,6 +275,8 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
     onSendFollowUp,
   }) => {
     const [question, setQuestion] = useState('');
+    const effectiveRehydrate = rehydrate && !isHistoricalView;
+    const effectiveVaultLookup = isHistoricalView ? undefined : vaultLookup;
 
     const riskBanner = useMemo(
       () =>
@@ -278,7 +287,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
     function handleFollowUpSubmit(e: React.FormEvent) {
       e.preventDefault();
       const q = question.trim();
-      if (!q || followUpRunning || running) return;
+      if (!q || followUpRunning || running || isHistoricalView) return;
       setQuestion('');
       onSendFollowUp(q);
     }
@@ -313,8 +322,21 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
           )}
         </div>
 
+        {/* Read-Only Historical Cloud Snapshot Callout */}
+        {result && isHistoricalView && (
+          <div
+            role="status"
+            className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3.5 py-2 text-[12.5px] text-[var(--n-muted)]"
+          >
+            <Lock className="h-3.5 w-3.5 shrink-0 text-[var(--n-accent)]" />
+            <span className="font-medium text-[var(--n-text)]">
+              Anonymized Cloud Snapshot · Original secrets were never persisted (RAM-only vault)
+            </span>
+          </div>
+        )}
+
         {/* Compact Hybrid Per-Run Metrics Strip */}
-        {result && runMetrics && (
+        {result && runMetrics && !isHistoricalView && (
           <div
             aria-label="Hybrid run metrics"
             className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3.5 py-2.5 text-[12px] sm:grid-cols-3 xl:grid-cols-6"
@@ -416,30 +438,34 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
             <>
               <StructuredAuditView
                 report={result.structuredAudit}
-                rehydrate={rehydrate}
-                vault={vault}
-                vaultLookup={vaultLookup}
+                rehydrate={effectiveRehydrate}
+                vault={isHistoricalView ? [] : vault}
+                vaultLookup={effectiveVaultLookup ?? {}}
               />
               <FollowUpThread
                 followUps={followUps}
                 followUpStreaming={followUpStreaming}
-                rehydrate={rehydrate}
-                vault={vault}
-                vaultLookup={vaultLookup}
+                rehydrate={effectiveRehydrate}
+                vault={isHistoricalView ? [] : vault}
+                vaultLookup={effectiveVaultLookup ?? {}}
               />
             </>
           ) : displayedMarkdown ? (
             <>
-              <RichOutput markdown={displayedMarkdown} vaultLookup={vaultLookup} />
+              <RichOutput
+                markdown={displayedMarkdown}
+                vaultLookup={effectiveVaultLookup}
+                isHistorical={isHistoricalView}
+              />
               {running && (
                 <span className="mt-2 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-[var(--n-accent)]" />
               )}
               <FollowUpThread
                 followUps={followUps}
                 followUpStreaming={followUpStreaming}
-                rehydrate={rehydrate}
-                vault={vault}
-                vaultLookup={vaultLookup}
+                rehydrate={effectiveRehydrate}
+                vault={isHistoricalView ? [] : vault}
+                vaultLookup={effectiveVaultLookup ?? {}}
               />
             </>
           ) : running ? (
@@ -489,21 +515,30 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
               <button
                 type="button"
                 onClick={onToggleRehydrate}
-                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition ${
-                  rehydrate
+                disabled={isHistoricalView}
+                title={
+                  isHistoricalView
+                    ? 'Original secrets were never saved to Firestore (RAM-only vault)'
+                    : effectiveRehydrate
+                      ? 'Hide real values locally'
+                      : 'Restore real values locally from RAM vault'
+                }
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition disabled:cursor-not-allowed disabled:opacity-45 ${
+                  effectiveRehydrate
                     ? 'bg-[var(--n-warn-soft)] text-[var(--n-warn)]'
                     : 'text-[var(--n-text)] hover:bg-[var(--n-hover)]'
                 }`}
               >
-                {rehydrate ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                {rehydrate ? 'Hide real names' : 'Show real names'}
+                {effectiveRehydrate ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {effectiveRehydrate ? 'Hide real names' : 'Show real names'}
               </button>
 
               <button
                 type="button"
                 onClick={onSaveToFirestore}
-                disabled={savingHistory}
-                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)] disabled:opacity-45"
+                disabled={savingHistory || isHistoricalView}
+                title={isHistoricalView ? 'Already stored as a saved cloud snapshot' : 'Save anonymized report to Firestore'}
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)] disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <Save className="h-3.5 w-3.5" />
                 {savingHistory ? 'Saving...' : 'Save'}
@@ -536,21 +571,27 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
             {!running && (
               <form
                 onSubmit={handleFollowUpSubmit}
-                className="flex items-center gap-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-1.5 focus-within:border-[var(--n-accent)]"
+                className={`flex items-center gap-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-1.5 ${
+                  isHistoricalView ? 'opacity-65' : 'focus-within:border-[var(--n-accent)]'
+                }`}
               >
                 <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--n-muted)]" />
                 <input
                   type="text"
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  disabled={followUpRunning}
-                  placeholder="Ask a follow-up question (private details auto-hidden)..."
-                  className="flex-1 bg-transparent py-1 text-[13.5px] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none"
+                  disabled={followUpRunning || isHistoricalView}
+                  placeholder={
+                    isHistoricalView
+                      ? 'Follow-up requires an active local session (run Analyze safely on a document)...'
+                      : 'Ask a follow-up question (private details auto-hidden)...'
+                  }
+                  className="flex-1 bg-transparent py-1 text-[13.5px] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none disabled:cursor-not-allowed"
                 />
                 <button
                   type="submit"
-                  disabled={!question.trim() || followUpRunning}
-                  className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[12.5px] font-medium text-[var(--n-accent)] transition hover:bg-[var(--n-hover)] disabled:opacity-40"
+                  disabled={!question.trim() || followUpRunning || isHistoricalView}
+                  className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[12.5px] font-medium text-[var(--n-accent)] transition hover:bg-[var(--n-hover)] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {followUpRunning ? (
                     <RefreshCw className="h-3.5 w-3.5 animate-spin" />

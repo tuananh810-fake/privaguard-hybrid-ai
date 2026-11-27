@@ -35,52 +35,72 @@ function sourceLabel(source: VaultEntry['source']): string {
 interface TokenChipProps {
   token: string;
   vaultLookup?: Record<string, VaultEntry>;
+  isHistorical?: boolean;
 }
 
-const InteractiveTokenChip: React.FC<TokenChipProps> = memo(({ token, vaultLookup }) => {
-  const [peek, setPeek] = useState(false);
-  const entry = vaultLookup?.[token];
+const InteractiveTokenChip: React.FC<TokenChipProps> = memo(
+  ({ token, vaultLookup, isHistorical }) => {
+    const [peek, setPeek] = useState(false);
 
-  if (!entry) {
+    if (isHistorical) {
+      return (
+        <span
+          translate="no"
+          title="Anonymized placeholder from saved cloud snapshot (original value was never persisted)"
+          className={`mx-0.5 inline-flex items-baseline gap-1 rounded px-1.5 py-0.5 font-mono text-[12px] font-medium ${tokenStyle(token)}`}
+        >
+          <span>{token}</span>
+        </span>
+      );
+    }
+
+    const entry = vaultLookup?.[token];
+
+    if (!entry) {
+      return (
+        <span
+          translate="no"
+          title={`Token ${token} is not in your local vault (hallucinated or stale placeholder)`}
+          className="mx-0.5 inline-flex items-baseline gap-1 rounded border border-dashed border-[var(--n-border-strong)] bg-[var(--n-surface)] px-1.5 py-0.5 font-mono text-[12px] font-medium text-[var(--n-muted)]"
+        >
+          <span>{token}</span>
+          <span className="font-sans text-[10px] font-normal">unknown token</span>
+        </span>
+      );
+    }
+
     return (
-      <span
+      <button
+        type="button"
         translate="no"
-        title={`Token ${token} is not in your local vault (hallucinated or stale placeholder)`}
-        className="mx-0.5 inline-flex items-baseline gap-1 rounded border border-dashed border-[var(--n-border-strong)] bg-[var(--n-surface)] px-1.5 py-0.5 font-mono text-[12px] font-medium text-[var(--n-muted)]"
+        onClick={() => setPeek((v) => !v)}
+        title={
+          peek
+            ? `Click to hide again (detected by ${sourceLabel(entry.source)})`
+            : `Click to peek original value locally (detected by ${sourceLabel(entry.source)})`
+        }
+        className={`mx-0.5 inline-flex items-baseline gap-1 rounded px-1.5 py-0.5 font-mono text-[12px] font-medium transition ${
+          peek
+            ? 'bg-[var(--n-warn-soft)] text-[var(--n-warn)] ring-1 ring-[var(--n-warn-border)]'
+            : `${tokenStyle(token)} hover:opacity-85`
+        }`}
       >
-        <span>{token}</span>
-        <span className="font-sans text-[10px] font-normal">unknown token</span>
-      </span>
+        <span>{peek ? entry.original : token}</span>
+        <span className="font-sans text-[9.5px] font-normal opacity-65">
+          {sourceLabel(entry.source)}
+        </span>
+      </button>
     );
   }
-
-  return (
-    <button
-      type="button"
-      translate="no"
-      onClick={() => setPeek((v) => !v)}
-      title={
-        peek
-          ? `Click to hide again (detected by ${sourceLabel(entry.source)})`
-          : `Click to peek original value locally (detected by ${sourceLabel(entry.source)})`
-      }
-      className={`mx-0.5 inline-flex items-baseline gap-1 rounded px-1.5 py-0.5 font-mono text-[12px] font-medium transition ${
-        peek
-          ? 'bg-[var(--n-warn-soft)] text-[var(--n-warn)] ring-1 ring-[var(--n-warn-border)]'
-          : `${tokenStyle(token)} hover:opacity-85`
-      }`}
-    >
-      <span>{peek ? entry.original : token}</span>
-      <span className="font-sans text-[9.5px] font-normal opacity-65">
-        {sourceLabel(entry.source)}
-      </span>
-    </button>
-  );
-});
+);
 
 InteractiveTokenChip.displayName = 'InteractiveTokenChip';
 
-function renderInline(text: string, vaultLookup?: Record<string, VaultEntry>): React.ReactNode[] {
+function renderInline(
+  text: string,
+  vaultLookup?: Record<string, VaultEntry>,
+  isHistorical?: boolean
+): React.ReactNode[] {
   const parts = text.split(
     /(\*\*[^*]+\*\*|\*[^*\n]+\*|`[^`]+`|\[[A-Z][A-Z0-9]*_\d+\])/g
   );
@@ -89,14 +109,14 @@ function renderInline(text: string, vaultLookup?: Record<string, VaultEntry>): R
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
       return (
         <strong key={idx} className="font-semibold text-[var(--n-text)]">
-          {renderInline(part.slice(2, -2), vaultLookup)}
+          {renderInline(part.slice(2, -2), vaultLookup, isHistorical)}
         </strong>
       );
     }
     if (part.startsWith('*') && part.endsWith('*') && !part.startsWith('**') && part.length > 2) {
       return (
         <em key={idx} className="italic text-[var(--n-muted)]">
-          {renderInline(part.slice(1, -1), vaultLookup)}
+          {renderInline(part.slice(1, -1), vaultLookup, isHistorical)}
         </em>
       );
     }
@@ -111,7 +131,14 @@ function renderInline(text: string, vaultLookup?: Record<string, VaultEntry>): R
       );
     }
     if (EXACT_TOKEN_REGEX.test(part)) {
-      return <InteractiveTokenChip key={idx} token={part} vaultLookup={vaultLookup} />;
+      return (
+        <InteractiveTokenChip
+          key={idx}
+          token={part}
+          vaultLookup={vaultLookup}
+          isHistorical={isHistorical}
+        />
+      );
     }
     return <React.Fragment key={idx}>{part}</React.Fragment>;
   });
@@ -235,9 +262,11 @@ export const RichOutput = memo(
   ({
     markdown,
     vaultLookup,
+    isHistorical,
   }: {
     markdown: string;
     vaultLookup?: Record<string, VaultEntry>;
+    isHistorical?: boolean;
   }) => {
     const blocks = parseMarkdownBlocks(markdown);
 
@@ -259,7 +288,7 @@ export const RichOutput = memo(
                     <tr className="border-b border-[var(--n-border)] bg-[var(--n-surface)] text-[var(--n-text)]">
                       {block.headers.map((h, hi) => (
                         <th key={hi} className="px-3 py-2 font-semibold">
-                          {renderInline(h, vaultLookup)}
+                          {renderInline(h, vaultLookup, isHistorical)}
                         </th>
                       ))}
                     </tr>
@@ -269,7 +298,7 @@ export const RichOutput = memo(
                       <tr key={ri} className="hover:bg-[var(--n-surface)]">
                         {row.map((cell, ci) => (
                           <td key={ci} className="px-3 py-2 text-[var(--n-text)]">
-                            {renderInline(cell, vaultLookup)}
+                            {renderInline(cell, vaultLookup, isHistorical)}
                           </td>
                         ))}
                       </tr>
@@ -286,21 +315,21 @@ export const RichOutput = memo(
           if (line.startsWith('### ')) {
             return (
               <h3 key={i} className="pt-3 text-[16px] font-semibold tracking-tight text-[var(--n-text)]">
-                {renderInline(line.slice(4), vaultLookup)}
+                {renderInline(line.slice(4), vaultLookup, isHistorical)}
               </h3>
             );
           }
           if (line.startsWith('## ')) {
             return (
               <h2 key={i} className="pt-3 text-[18px] font-semibold tracking-tight text-[var(--n-text)]">
-                {renderInline(line.slice(3), vaultLookup)}
+                {renderInline(line.slice(3), vaultLookup, isHistorical)}
               </h2>
             );
           }
           if (line.startsWith('# ')) {
             return (
               <h1 key={i} className="pt-3 text-[20px] font-bold tracking-tight text-[var(--n-text)]">
-                {renderInline(line.slice(2), vaultLookup)}
+                {renderInline(line.slice(2), vaultLookup, isHistorical)}
               </h1>
             );
           }
@@ -310,7 +339,7 @@ export const RichOutput = memo(
                 key={i}
                 className="border-l-[3px] border-[var(--n-border-strong)] pl-3.5 text-[var(--n-muted)]"
               >
-                {renderInline(line.slice(2), vaultLookup)}
+                {renderInline(line.slice(2), vaultLookup, isHistorical)}
               </blockquote>
             );
           }
@@ -319,7 +348,7 @@ export const RichOutput = memo(
               <div key={i} className="flex gap-2.5 pl-1">
                 <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--n-muted)]" />
                 <div className="flex-1">
-                  {renderInline(line.replace(/^[-*•]\s+/, ''), vaultLookup)}
+                  {renderInline(line.replace(/^[-*•]\s+/, ''), vaultLookup, isHistorical)}
                 </div>
               </div>
             );
@@ -331,11 +360,11 @@ export const RichOutput = memo(
                 <span className="font-mono text-[13px] font-medium text-[var(--n-muted)]">
                   {numMatch[1]}.
                 </span>
-                <div className="flex-1">{renderInline(numMatch[2], vaultLookup)}</div>
+                <div className="flex-1">{renderInline(numMatch[2], vaultLookup, isHistorical)}</div>
               </div>
             );
           }
-          return <p key={i}>{renderInline(line, vaultLookup)}</p>;
+          return <p key={i}>{renderInline(line, vaultLookup, isHistorical)}</p>;
         })}
       </div>
     );

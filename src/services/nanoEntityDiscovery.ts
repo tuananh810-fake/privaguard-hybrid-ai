@@ -9,6 +9,62 @@ export interface NanoDiscoveryResult {
   entities: NanoDiscoveredEntity[];
   usedNano: boolean;
   latencyMs: number;
+  scannedChars: number;
+  totalChars: number;
+  truncated: boolean;
+}
+
+export const NANO_CHUNK_SIZE = 1800;
+export const NANO_CHUNK_OVERLAP = 120;
+export const NANO_MAX_CHUNKS = 3;
+
+export interface NanoChunkSlice {
+  text: string;
+  start: number;
+  end: number;
+}
+
+export interface NanoChunkPlan {
+  chunks: NanoChunkSlice[];
+  scannedChars: number;
+  totalChars: number;
+  truncated: boolean;
+}
+
+/**
+ * Computes bounded overlapping slices for on-device Gemini Nano discovery
+ * and reports honest character coverage / truncation metadata.
+ */
+export function buildNanoChunkPlan(
+  rawText: string,
+  options: { chunkSize?: number; overlap?: number; maxChunks?: number } = {}
+): NanoChunkPlan {
+  const chunkSize = options.chunkSize ?? NANO_CHUNK_SIZE;
+  const overlap = options.overlap ?? NANO_CHUNK_OVERLAP;
+  const maxChunks = options.maxChunks ?? NANO_MAX_CHUNKS;
+  const totalChars = rawText.length;
+
+  if (totalChars === 0) {
+    return { chunks: [], scannedChars: 0, totalChars: 0, truncated: false };
+  }
+
+  const step = Math.max(1, chunkSize - overlap);
+  const chunks: NanoChunkSlice[] = [];
+  let maxEnd = 0;
+
+  for (let pos = 0; pos < totalChars && chunks.length < maxChunks; pos += step) {
+    const end = Math.min(totalChars, pos + chunkSize);
+    chunks.push({ text: rawText.slice(pos, end), start: pos, end });
+    if (end > maxEnd) maxEnd = end;
+    if (end >= totalChars) break;
+  }
+
+  return {
+    chunks,
+    scannedChars: Math.min(totalChars, maxEnd),
+    totalChars,
+    truncated: maxEnd < totalChars,
+  };
 }
 
 const VALID_TYPES = new Set<NanoEntityType>(['PERSON', 'ORG', 'ADDRESS', 'LOCATION']);
@@ -156,9 +212,17 @@ export async function discoverSemanticEntitiesWithNano(
   const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const timeoutMs = options.timeoutMs ?? 5000;
   const alreadyMasked = options.alreadyMaskedByRegex ?? [];
+  const totalChars = rawText.length;
 
   if (!rawText.trim() || options.signal?.aborted) {
-    return { entities: [], usedNano: false, latencyMs: 0 };
+    return {
+      entities: [],
+      usedNano: false,
+      latencyMs: 0,
+      scannedChars: 0,
+      totalChars,
+      truncated: totalChars > 0,
+    };
   }
 
   const controller = new AbortController();
@@ -175,23 +239,20 @@ export async function discoverSemanticEntitiesWithNano(
         entities: [],
         usedNano: false,
         latencyMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started),
+        scannedChars: 0,
+        totalChars,
+        truncated: totalChars > 0,
       };
     }
 
     const model = createOnDeviceNanoModel();
-
-    const chunkSize = 1800;
-    const overlap = 120;
-    const chunks: string[] = [];
-    for (let pos = 0; pos < rawText.length && chunks.length < 3; pos += chunkSize - overlap) {
-      chunks.push(rawText.slice(pos, pos + chunkSize));
-      if (pos + chunkSize >= rawText.length) break;
-    }
+    const plan = buildNanoChunkPlan(rawText);
 
     const rawCandidates: NanoDiscoveredEntity[] = [];
     let usedNano = false;
+    let scannedChars = 0;
 
-    for (const chunk of chunks) {
+    for (const chunk of plan.chunks) {
       if (controller.signal.aborted) break;
 
       const abortPromise = new Promise<never>((_, reject) => {
@@ -207,7 +268,7 @@ export async function discoverSemanticEntitiesWithNano(
       });
 
       const response = await Promise.race([
-        model.generateContent(buildDiscoveryPrompt(chunk)),
+        model.generateContent(buildDiscoveryPrompt(chunk.text)),
         abortPromise,
       ]);
 
@@ -217,15 +278,30 @@ export async function discoverSemanticEntitiesWithNano(
       }
 
       usedNano = true;
+      scannedChars = Math.min(totalChars, Math.max(scannedChars, chunk.end));
       rawCandidates.push(...parseNanoEntityResponse(text));
     }
 
     const filtered = filterNanoEntities(rawText, rawCandidates, alreadyMasked);
     const elapsed = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started);
-    return { entities: filtered, usedNano, latencyMs: elapsed };
+    return {
+      entities: filtered,
+      usedNano,
+      latencyMs: elapsed,
+      scannedChars,
+      totalChars,
+      truncated: scannedChars < totalChars,
+    };
   } catch {
     const elapsed = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started);
-    return { entities: [], usedNano: false, latencyMs: elapsed };
+    return {
+      entities: [],
+      usedNano: false,
+      latencyMs: elapsed,
+      scannedChars: 0,
+      totalChars,
+      truncated: totalChars > 0,
+    };
   } finally {
     clearTimeout(timer);
     options.signal?.removeEventListener('abort', onParentAbort);

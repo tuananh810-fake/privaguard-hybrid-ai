@@ -1,9 +1,11 @@
-const CACHE_NAME = 'privaguard-shell-v6.1.0';
+const CACHE_NAME = 'privaguard-shell-v6.2.0';
 const APP_SHELL_URLS = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
   '/icon.svg',
+  '/icon-192.png',
+  '/icon-512.png',
   '/samples/nda-sample.pdf',
   '/samples/id-card-sample.png',
 ];
@@ -83,7 +85,9 @@ self.addEventListener('fetch', (event) => {
     url.pathname.startsWith('/samples/') ||
     url.pathname.startsWith('/tesseract/') ||
     url.pathname === '/manifest.webmanifest' ||
-    url.pathname === '/icon.svg';
+    url.pathname === '/icon.svg' ||
+    url.pathname === '/icon-192.png' ||
+    url.pathname === '/icon-512.png';
 
   if (!isCacheablePath) return;
 

@@ -12,6 +12,15 @@ import {
   where,
 } from 'firebase/firestore';
 import { app } from '../firebase';
+import {
+  AnalysisPayloadInput,
+  SanitizedAnalysisPayload,
+  sanitizeAnalysisPayload,
+  ValidInferenceSource,
+} from './historySanitizer';
+
+export { sanitizeAnalysisPayload };
+export type { AnalysisPayloadInput, SanitizedAnalysisPayload, ValidInferenceSource };
 
 export interface SavedAnalysis {
   id: string;
@@ -128,9 +137,10 @@ export async function saveAnonymizedAnalysis(
 ): Promise<string> {
   try {
     const uid = await ensureAnonymousUid();
-    const workspaceId = getWorkspaceId();
+    const workspaceId = (getWorkspaceId().trim() || 'default-session').slice(0, 128);
+    const sanitized = sanitizeAnalysisPayload(entry);
     const ref = await addDoc(collection(db, COLLECTION), {
-      ...entry,
+      ...sanitized,
       ownerUid: uid || workspaceId,
       workspaceId,
       createdAt: serverTimestamp(),

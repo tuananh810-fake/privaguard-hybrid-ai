@@ -19,9 +19,11 @@ import {
 import { matchPiiBoxesFromOcrLines } from '../src/services/ocrPiiMatcher.ts';
 import { classifyDroppedFile, getFileExtension } from '../src/services/documentParser.ts';
 import {
+  buildNanoChunkPlan,
   filterNanoEntities,
   parseNanoEntityResponse,
 } from '../src/services/nanoEntityDiscovery.ts';
+import { sanitizeAnalysisPayload } from '../src/services/historySanitizer.ts';
 
 test('redacts JWT, PEM private key, and DB connection URI with zero leaks', () => {
   const jwt =
@@ -316,4 +318,75 @@ test('v6.1 rawPiiBytesSent: computes 0 B when clean, exact UTF-8 bytes on Vietna
   const detectedLeaks = findLeakedOriginals(simulatedLeakedPayload, res.vault);
   assert.deepEqual(detectedLeaks, [vnName]);
   assert.equal(computeRawPiiBytes(detectedLeaks), expectedUtf8Bytes);
+});
+
+test('v6.2 sanitizeAnalysisPayload: clamps and sanitizes all fields to match firestore.rules bounds', () => {
+  const sanitized = sanitizeAnalysisPayload({
+    task: '   ',
+    inferenceSource: 'EDGE_MAGIC',
+    modelUsed: 'm'.repeat(180),
+    latencyMs: 999_999,
+    ttftMs: -42,
+    piiCount: 12_345.7,
+    bytesShielded: 2_500_000,
+    redactedPreview: 'p'.repeat(900),
+    analysisText: 'a'.repeat(35_000),
+  });
+
+  assert.equal(sanitized.task, 'executive');
+  assert.equal(sanitized.inferenceSource, 'UNKNOWN');
+  assert.equal(sanitized.modelUsed.length, 100);
+  assert.equal(sanitized.latencyMs, 600_000);
+  assert.equal(sanitized.ttftMs, 0);
+  assert.equal(sanitized.piiCount, 5_000);
+  assert.equal(sanitized.bytesShielded, 1_000_000);
+  assert.equal(sanitized.redactedPreview.length, 500);
+  assert.equal(sanitized.analysisText.length, 30_000);
+
+  // Missing / NaN ttftMs defaults to sanitized latencyMs; oversized task truncates to 40 chars
+  const defaulted = sanitizeAnalysisPayload({
+    task: 'risk_audit_' + 'x'.repeat(60),
+    inferenceSource: 'ON_DEVICE',
+    modelUsed: 'Gemini Nano (On-Device)',
+    latencyMs: 412,
+    ttftMs: undefined,
+    piiCount: -5,
+    bytesShielded: Number.NaN,
+    redactedPreview: '[EMAIL_1]',
+    analysisText: 'Safe summary',
+  });
+  assert.equal(defaulted.task.length, 40);
+  assert.equal(defaulted.inferenceSource, 'ON_DEVICE');
+  assert.equal(defaulted.ttftMs, 412);
+  assert.equal(defaulted.piiCount, 0);
+  assert.equal(defaulted.bytesShielded, 0);
+});
+
+test('v6.2 buildNanoChunkPlan: reports exact character coverage and truncation on > 5,160 char inputs', () => {
+  // Short input -> 1 chunk, not truncated
+  const shortPlan = buildNanoChunkPlan('x'.repeat(1_200));
+  assert.equal(shortPlan.chunks.length, 1);
+  assert.equal(shortPlan.scannedChars, 1_200);
+  assert.equal(shortPlan.totalChars, 1_200);
+  assert.equal(shortPlan.truncated, false);
+
+  // Boundary exact fit (5,160 chars) -> 3 chunks, not truncated
+  const exactPlan = buildNanoChunkPlan('y'.repeat(5_160));
+  assert.equal(exactPlan.chunks.length, 3);
+  assert.equal(exactPlan.scannedChars, 5_160);
+  assert.equal(exactPlan.totalChars, 5_160);
+  assert.equal(exactPlan.truncated, false);
+
+  // Long input (12,400 chars) -> 3 chunks covering first 5,160 chars with 120-char overlap, truncated = true
+  const longPlan = buildNanoChunkPlan('z'.repeat(12_400));
+  assert.equal(longPlan.chunks.length, 3);
+  assert.equal(longPlan.chunks[0].start, 0);
+  assert.equal(longPlan.chunks[0].end, 1_800);
+  assert.equal(longPlan.chunks[1].start, 1_680);
+  assert.equal(longPlan.chunks[1].end, 3_480);
+  assert.equal(longPlan.chunks[2].start, 3_360);
+  assert.equal(longPlan.chunks[2].end, 5_160);
+  assert.equal(longPlan.scannedChars, 5_160);
+  assert.equal(longPlan.totalChars, 12_400);
+  assert.equal(longPlan.truncated, true);
 });

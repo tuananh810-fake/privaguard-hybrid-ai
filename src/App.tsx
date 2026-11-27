@@ -36,7 +36,7 @@ import {
   ModeKey,
   NanoAvailability,
 } from './services/hybridAI';
-import type { NanoDiscoveredEntity } from './services/nanoEntityDiscovery';
+import type { NanoDiscoveredEntity, NanoDiscoveryResult } from './services/nanoEntityDiscovery';
 import { classifyDroppedFile, parseDocumentLocally } from './services/documentParser';
 import type { SavedAnalysis } from './services/historyStore';
 import { TechDrawer } from './components/TechDrawer';
@@ -49,6 +49,17 @@ const ImageRedactorModal = lazy(() =>
 );
 
 type ThemeMode = 'light' | 'dark';
+
+function formatNanoScanNotice(scan: NanoDiscoveryResult): string {
+  const count = scan.entities.length;
+  const entityLabel = count === 1 ? 'entity' : 'entities';
+  if (scan.truncated && scan.scannedChars > 0) {
+    return `Nano scanned first ${scan.scannedChars.toLocaleString()} of ${scan.totalChars.toLocaleString()} chars · found ${count} ${entityLabel} · mark later names manually`;
+  }
+  return count > 0
+    ? `Nano found ${count} semantic ${entityLabel}`
+    : 'Nano scan complete · 0 new entities';
+}
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>(() => {
@@ -93,10 +104,12 @@ export default function App() {
   const [aiDiscoveredEntities, setAiDiscoveredEntities] = useState<NanoDiscoveredEntity[]>([]);
   const [scanningNano, setScanningNano] = useState(false);
   const [nanoScanNotice, setNanoScanNotice] = useState<string | null>(null);
+  const [nanoScanTruncated, setNanoScanTruncated] = useState(false);
   const [extraFollowUpVault, setExtraFollowUpVault] = useState<VaultEntry[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [result, setResult] = useState<HybridResponse | null>(null);
   const [runMetrics, setRunMetrics] = useState<RunMetrics | null>(null);
+  const [isHistoricalView, setIsHistoricalView] = useState(false);
   const [rehydrate, setRehydrate] = useState(false);
   const [running, setRunning] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -303,8 +316,8 @@ export default function App() {
   const displayedMarkdown = useMemo(() => {
     const src = result ? result.text : streamingText;
     if (!src) return '';
-    return rehydrate ? rehydrateLocally(src, combinedVault) : src;
-  }, [result, streamingText, rehydrate, combinedVault]);
+    return rehydrate && !isHistoricalView ? rehydrateLocally(src, combinedVault) : src;
+  }, [result, streamingText, rehydrate, isHistoricalView, combinedVault]);
 
   const scheduleStreamUpdate = useCallback(
     (setter: React.Dispatch<React.SetStateAction<string>>, text: string) => {
@@ -328,6 +341,8 @@ export default function App() {
     nanoScanAbortRef.current?.abort();
     nanoScannedTextRef.current = null;
     setNanoScanNotice(null);
+    setNanoScanTruncated(false);
+    setIsHistoricalView(false);
     setRawText(val);
   }, []);
 
@@ -339,6 +354,8 @@ export default function App() {
     setRunning(false);
     setScanningNano(false);
     setNanoScanNotice(null);
+    setNanoScanTruncated(false);
+    setIsHistoricalView(false);
     setRawText(content);
     setFileMeta(null);
     setAiDiscoveredEntities([]);
@@ -356,6 +373,7 @@ export default function App() {
     nanoScanAbortRef.current?.abort();
     nanoScannedTextRef.current = null;
     setNanoScanNotice(null);
+    setNanoScanTruncated(false);
     setCategories((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
@@ -367,6 +385,7 @@ export default function App() {
 
     setScanningNano(true);
     setNanoScanNotice(null);
+    setNanoScanTruncated(false);
 
     try {
       const regexOnly = redactLocally(rawText, [], categories);
@@ -382,13 +401,11 @@ export default function App() {
       nanoEntitiesRef.current = discovered;
       nanoScannedTextRef.current = rawText;
       setAiDiscoveredEntities(discovered);
-      setNanoScanNotice(
-        discovered.length > 0
-          ? `Nano found ${discovered.length} semantic ${discovered.length === 1 ? 'entity' : 'entities'}`
-          : 'Nano scan complete · 0 new entities'
-      );
+      setNanoScanTruncated(localScan.truncated && localScan.scannedChars > 0);
+      setNanoScanNotice(formatNanoScanNotice(localScan));
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
+      setNanoScanTruncated(false);
       setNanoScanNotice('Nano scan complete · 0 new entities');
     } finally {
       if (nanoScanAbortRef.current === controller) {
@@ -406,6 +423,8 @@ export default function App() {
     setRunning(false);
     setScanningNano(false);
     setNanoScanNotice(null);
+    setNanoScanTruncated(false);
+    setIsHistoricalView(false);
     setExtractingFile(true);
     setErrorMsg(null);
     try {
@@ -486,6 +505,7 @@ export default function App() {
     abortRef.current = controller;
 
     setRunning(true);
+    setIsHistoricalView(false);
     setErrorMsg(null);
     setSavedNotice(null);
     setRunMetrics(null);
@@ -520,6 +540,8 @@ export default function App() {
           nanoEntitiesRef.current = discovered;
           nanoScannedTextRef.current = rawText;
           setAiDiscoveredEntities(discovered);
+          setNanoScanTruncated(localScan.truncated && localScan.scannedChars > 0);
+          setNanoScanNotice(formatNanoScanNotice(localScan));
         }
       }
 
@@ -571,6 +593,10 @@ export default function App() {
           bytesSentToCloud,
           rawPiiBytesSent,
           shieldTimeMs: finalRedaction.shieldTimeMs,
+          sentPayloadText: finalRedaction.redactedText,
+          sentVaultCount: finalRedaction.vault.length,
+          sentBytesShielded: finalRedaction.bytesShielded,
+          sentLeakCount: finalRedaction.leaksFound,
         });
         setStreamingText(aiRes.text);
       }
@@ -616,31 +642,58 @@ export default function App() {
 
   const handleSendFollowUp = useCallback(
     async (rawQuestion: string) => {
-      if (!result) return;
+      if (!result || isHistoricalView || !rawQuestion.trim()) return;
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const followUpRedaction = redactLocally(rawQuestion, taggedTerms, categories, combinedVault);
-      if (followUpRedaction.vault.length > combinedVault.length) {
-        setExtraFollowUpVault(followUpRedaction.vault);
-      }
-      const redactedQ = followUpRedaction.redactedText;
-
-      const userMsg: FollowUpMessage = {
-        id: `u-${Date.now()}`,
-        role: 'user',
-        text: redactedQ,
-      };
-      setFollowUps((prev) => [...prev, userMsg]);
       setFollowUpStreaming('');
       setFollowUpRunning(true);
       setErrorMsg(null);
 
       try {
+        let mergedTerms: TaggedSensitiveTerm[] = taggedTerms;
+        if (nanoStatus === 'available' && rawQuestion.trim()) {
+          try {
+            const regexOnly = redactLocally(rawQuestion, [], categories, combinedVault);
+            const { discoverSemanticEntitiesWithNano } = await import('./services/nanoEntityDiscovery');
+            const localScan = await discoverSemanticEntitiesWithNano(rawQuestion, {
+              alreadyMaskedByRegex: regexOnly.vault.map((v) => v.original),
+              timeoutMs: 2500,
+              signal: controller.signal,
+            });
+            if (controller.signal.aborted) return;
+            if (localScan.entities.length > 0) {
+              const followUpNanoTerms: TaggedSensitiveTerm[] = localScan.entities.map((e) => ({
+                text: e.text,
+                source: 'nano',
+                category: e.type,
+              }));
+              mergedTerms = [...followUpNanoTerms, ...taggedTerms];
+            }
+          } catch {
+            // Non-blocking fallback to regex + existing terms on Nano error/timeout
+          }
+        }
+
+        if (controller.signal.aborted) return;
+
+        const followUpRedaction = redactLocally(rawQuestion, mergedTerms, categories, combinedVault);
+        if (followUpRedaction.vault.length > combinedVault.length) {
+          setExtraFollowUpVault(followUpRedaction.vault);
+        }
+        const redactedQ = followUpRedaction.redactedText;
+
+        const userMsg: FollowUpMessage = {
+          id: `u-${Date.now()}`,
+          role: 'user',
+          text: redactedQ,
+        };
+        setFollowUps((prev) => [...prev, userMsg]);
+
         const effectiveMode: ModeKey = !effectiveOnline ? 'ONLY_ON_DEVICE' : mode;
         const aiRes = await generateFollowUpStream(
-          redaction.redactedText,
+          runMetrics?.sentPayloadText ?? redaction.redactedText,
           result.text,
           followUps,
           redactedQ,
@@ -678,12 +731,15 @@ export default function App() {
     },
     [
       result,
+      isHistoricalView,
+      nanoStatus,
       taggedTerms,
       categories,
       combinedVault,
       followUps,
       effectiveOnline,
       mode,
+      runMetrics?.sentPayloadText,
       redaction.redactedText,
       remoteSettings.cloudModel,
       remoteSettings.systemPromptStyle,
@@ -700,30 +756,46 @@ export default function App() {
 
   const handleExportMarkdown = useCallback(async () => {
     if (!displayedMarkdown) return;
+    const snapshotPayloadText = runMetrics?.sentPayloadText ?? redaction.redactedText;
+    const snapshotVaultCount = runMetrics?.sentVaultCount ?? combinedVault.length;
+    const snapshotBytesShielded = runMetrics?.sentBytesShielded ?? redaction.bytesShielded;
+    const snapshotLeakCount = runMetrics?.sentLeakCount ?? leakCheck;
+    const snapshotSourceCounts = runMetrics?.sourceCounts ?? redaction.sourceCounts;
+
     let payloadHash = 'unavailable';
-    try {
-      if (typeof crypto !== 'undefined' && crypto.subtle) {
-        const bytes = new TextEncoder().encode(redaction.redactedText);
-        const digest = await crypto.subtle.digest('SHA-256', bytes);
-        payloadHash = Array.from(new Uint8Array(digest))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('');
+    if (!isHistoricalView) {
+      try {
+        if (typeof crypto !== 'undefined' && crypto.subtle) {
+          const bytes = new TextEncoder().encode(snapshotPayloadText);
+          const digest = await crypto.subtle.digest('SHA-256', bytes);
+          payloadHash = Array.from(new Uint8Array(digest))
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join('');
+        }
+      } catch {
+        payloadHash = 'unavailable';
       }
-    } catch {
-      payloadHash = 'unavailable';
     }
 
-    const verificationFooter = [
-      '\n\n---',
-      '### PrivaGuard Local Detection & Masking Proof',
-      `- **Timestamp (UTC):** ${new Date().toISOString()}`,
-      `- **Inference Engine:** ${result?.inferenceSource === 'ON_DEVICE' ? 'Device (Gemini Nano)' : `Cloud (${result?.modelUsed || 'gemini-3.6-flash'})`}`,
-      `- **Detected PII Masked Locally:** ${combinedVault.length} (regex ${redaction.sourceCounts.regex} / Nano ${redaction.sourceCounts.nano} / manual ${redaction.sourceCounts.manual})`,
-      `- **Private Bytes Protected in RAM:** ${redaction.bytesShielded} bytes`,
-      `- **Detected PII Sent to Cloud:** ${leakCheck} (0 detected PII sent to cloud when 0)`,
-      `- **Detection Scope:** regex + on-device Nano + manual marks`,
-      `- **Sanitized Payload SHA-256:** \`${payloadHash}\``,
-    ].join('\n');
+    const verificationFooter = isHistoricalView
+      ? [
+          '\n\n---',
+          '### PrivaGuard Anonymized Cloud Snapshot',
+          `- **Exported (UTC):** ${new Date().toISOString()}`,
+          `- **Inference Engine:** ${result?.inferenceSource === 'ON_DEVICE' ? 'Device (Gemini Nano)' : `Cloud (${result?.modelUsed || 'gemini-3.6-flash'})`}`,
+          '- **Vault Persistence:** Original secrets were never persisted (RAM-only vault)',
+        ].join('\n')
+      : [
+          '\n\n---',
+          '### PrivaGuard Local Detection & Masking Proof',
+          `- **Timestamp (UTC):** ${new Date().toISOString()}`,
+          `- **Inference Engine:** ${result?.inferenceSource === 'ON_DEVICE' ? 'Device (Gemini Nano)' : `Cloud (${result?.modelUsed || 'gemini-3.6-flash'})`}`,
+          `- **Detected PII Masked Locally:** ${snapshotVaultCount} (regex ${snapshotSourceCounts.regex} / Nano ${snapshotSourceCounts.nano} / manual ${snapshotSourceCounts.manual})`,
+          `- **Private Bytes Protected in RAM:** ${snapshotBytesShielded} bytes`,
+          `- **Detected PII Sent to Cloud:** ${snapshotLeakCount} (0 detected PII sent to cloud when 0)`,
+          `- **Detection Scope:** regex + on-device Nano + manual marks`,
+          `- **Sanitized Payload SHA-256:** \`${payloadHash}\``,
+        ].join('\n');
 
     const blob = new Blob([displayedMarkdown + verificationFooter], {
       type: 'text/markdown;charset=utf-8',
@@ -734,34 +806,53 @@ export default function App() {
     a.download = `privaguard-${task}-${Date.now()}.md`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [displayedMarkdown, task, redaction.redactedText, redaction.bytesShielded, result, combinedVault.length, leakCheck]);
+  }, [
+    displayedMarkdown,
+    task,
+    isHistoricalView,
+    runMetrics,
+    redaction.redactedText,
+    redaction.bytesShielded,
+    redaction.sourceCounts,
+    result,
+    combinedVault.length,
+    leakCheck,
+  ]);
 
   const handleSaveToFirestore = useCallback(async () => {
-    if (!result) return;
+    if (!result || isHistoricalView) return;
     setSavingHistory(true);
     setSavedNotice(null);
     try {
       const mod = await loadHistoryStore();
-      await mod.saveAnonymizedAnalysis({
+      const payload = mod.sanitizeAnalysisPayload({
         task,
         inferenceSource: result.inferenceSource,
         modelUsed: result.modelUsed,
         latencyMs: result.latencyMs,
-        ttftMs: result.ttftMs,
-        piiCount: combinedVault.length,
-        bytesShielded: redaction.bytesShielded,
-        redactedPreview: redaction.redactedText.slice(0, 180),
+        ttftMs: result.ttftMs ?? result.latencyMs,
+        piiCount: runMetrics?.sentVaultCount ?? combinedVault.length,
+        bytesShielded: runMetrics?.sentBytesShielded ?? redaction.bytesShielded,
+        redactedPreview: (runMetrics?.sentPayloadText ?? redaction.redactedText).slice(0, 180),
         analysisText: result.text,
       });
+      await mod.saveAnonymizedAnalysis(payload);
       setSavedNotice('Saved safely without personal details.');
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
       setSavingHistory(false);
     }
-  }, [result, task, combinedVault.length, redaction, loadHistoryStore]);
+  }, [result, isHistoricalView, task, runMetrics, combinedVault.length, redaction, loadHistoryStore]);
 
   const handleSelectHistory = useCallback((item: SavedAnalysis) => {
+    abortRef.current?.abort();
+    setRunning(false);
+    setFollowUpRunning(false);
+    setIsHistoricalView(true);
+    setRehydrate(false);
+    setSavedNotice(null);
+    setErrorMsg(null);
     setResult({
       text: item.analysisText,
       inferenceSource: item.inferenceSource === 'ON_DEVICE' ? 'ON_DEVICE' : 'IN_CLOUD',
@@ -769,12 +860,7 @@ export default function App() {
       ttftMs: item.ttftMs || item.latencyMs,
       modelUsed: item.modelUsed,
     });
-    setRunMetrics({
-      sourceCounts: { regex: item.piiCount, nano: 0, manual: 0 },
-      bytesSentToCloud: item.inferenceSource === 'ON_DEVICE' ? 0 : item.redactedPreview.length,
-      rawPiiBytesSent: 0,
-      shieldTimeMs: 0,
-    });
+    setRunMetrics(null);
     setFollowUps([]);
     setFollowUpStreaming('');
   }, []);
@@ -921,10 +1007,12 @@ export default function App() {
             manualTerms={manualTermsList}
             onAddManualTerm={handleAddManualTerm}
             onRemoveManualTerm={handleRemoveManualTerm}
-            nanoStatus={nanoStatus}
+            nanoStatus={nanoChecked ? nanoStatus : 'checking'}
             scanningNano={scanningNano}
             nanoScanNotice={nanoScanNotice}
+            nanoScanTruncated={nanoScanTruncated}
             onScanNano={handleScanNano}
+            onOpenNanoGuide={() => setShowTechDrawer(true)}
             attachedImage={attachedImage}
             imageMaskCount={imageMaskCount}
             onOpenImageRedactor={() => setShowImageRedactor(true)}
@@ -943,6 +1031,7 @@ export default function App() {
             <AnalysisOutputPanel
               result={result}
               runMetrics={runMetrics}
+              isHistoricalView={isHistoricalView}
               displayedMarkdown={displayedMarkdown}
               running={running}
               errorMsg={errorMsg}
@@ -951,7 +1040,9 @@ export default function App() {
               bytesShielded={redaction.bytesShielded}
               shieldTimeMs={redaction.shieldTimeMs}
               rehydrate={rehydrate}
-              onToggleRehydrate={() => setRehydrate((r) => !r)}
+              onToggleRehydrate={() => {
+                if (!isHistoricalView) setRehydrate((r) => !r);
+              }}
               savingHistory={savingHistory}
               savedNotice={savedNotice}
               onSaveToFirestore={handleSaveToFirestore}
