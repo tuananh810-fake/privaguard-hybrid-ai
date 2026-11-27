@@ -128,6 +128,26 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     const dragDepthRef = useRef(0);
     const [attachMenuOpen, setAttachMenuOpen] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
+    const [loadingSample, setLoadingSample] = useState<'pdf' | 'image' | null>(null);
+
+    async function handleLoadSampleFile(kind: 'pdf' | 'image') {
+      if (loadingSample || extractingFile) return;
+      setLoadingSample(kind);
+      try {
+        const url = kind === 'pdf' ? '/samples/nda-sample.pdf' : '/samples/id-card-sample.png';
+        const fileName = kind === 'pdf' ? 'nda-sample.pdf' : 'id-card-sample.png';
+        const mimeType = kind === 'pdf' ? 'application/pdf' : 'image/png';
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Failed to fetch ${fileName} (${res.status})`);
+        const blob = await res.blob();
+        const file = new File([blob], fileName, { type: blob.type || mimeType });
+        onFileDrop(file);
+      } catch (err) {
+        console.error('Failed to load sample file:', err);
+      } finally {
+        setLoadingSample(null);
+      }
+    }
 
     useEffect(() => {
       if (!attachMenuOpen) return;
@@ -218,6 +238,39 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                   .replace(' & Payout', '')}
               </button>
             ))}
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px] text-[var(--n-muted)]">
+            <button
+              type="button"
+              onClick={() => handleLoadSampleFile('pdf')}
+              disabled={extractingFile || loadingSample !== null}
+              aria-label="Try sample NDA PDF processed locally"
+              aria-busy={loadingSample === 'pdf'}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)] disabled:opacity-50"
+            >
+              {loadingSample === 'pdf' ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : (
+                <FileText className="h-3 w-3" />
+              )}
+              {loadingSample === 'pdf' ? 'Loading sample PDF…' : 'Try sample PDF'}
+            </button>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              onClick={() => handleLoadSampleFile('image')}
+              disabled={extractingFile || loadingSample !== null}
+              aria-label="Try sample ID card image for local OCR redaction"
+              aria-busy={loadingSample === 'image'}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)] disabled:opacity-50"
+            >
+              {loadingSample === 'image' ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : (
+                <ImageIcon className="h-3 w-3" />
+              )}
+              {loadingSample === 'image' ? 'Loading sample image…' : 'Try sample image'}
+            </button>
           </div>
         </div>
 

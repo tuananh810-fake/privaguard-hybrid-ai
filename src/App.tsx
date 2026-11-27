@@ -74,7 +74,7 @@ export default function App() {
   const [nanoStatus, setNanoStatus] = useState<NanoAvailability>('unavailable');
   const [remoteSettings, setRemoteSettings] = useState<RemoteSettings>({
     defaultInferenceMode: 'PREFER_ON_DEVICE',
-    cloudModel: 'gemini-2.5-flash',
+    cloudModel: 'gemini-3.6-flash',
     systemPromptStyle: 'concise_executive',
     loadedFromServer: false,
   });

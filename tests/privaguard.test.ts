@@ -169,3 +169,35 @@ test('v5.0 documentParser: classifies PDF, DOCX, TXT, Image, and unsupported fil
   assert.equal(classifyDroppedFile({ name: 'receipt.webp', type: 'image/webp' }), 'image');
   assert.equal(classifyDroppedFile({ name: 'archive.zip', type: 'application/zip' }), 'unsupported');
 });
+
+test('v5.1 ocrPiiMatcher: detects Vietnamese diacritics and VN phone ("Nguyễn Văn A, SĐT 0912 345 678")', () => {
+  const lines = [
+    {
+      text: 'Nguyễn Văn A, SĐT 0912 345 678',
+      bbox: { x0: 12, y0: 30, x1: 360, y1: 54 },
+      words: [
+        { text: 'Nguyễn', bbox: { x0: 12, y0: 30, x1: 72, y1: 54 } },
+        { text: 'Văn', bbox: { x0: 78, y0: 30, x1: 112, y1: 54 } },
+        { text: 'A,', bbox: { x0: 118, y0: 30, x1: 138, y1: 54 } },
+        { text: 'SĐT', bbox: { x0: 146, y0: 30, x1: 184, y1: 54 } },
+        { text: '0912', bbox: { x0: 192, y0: 30, x1: 238, y1: 54 } },
+        { text: '345', bbox: { x0: 244, y0: 30, x1: 282, y1: 54 } },
+        { text: '678', bbox: { x0: 288, y0: 30, x1: 326, y1: 54 } },
+      ],
+    },
+  ];
+
+  const { boxes, matchedTokens } = matchPiiBoxesFromOcrLines(
+    lines,
+    ['Nguyễn Văn A'],
+    DEFAULT_CATEGORY_FILTER,
+    { padding: 4, canvasWidth: 500, canvasHeight: 200 }
+  );
+
+  assert.equal(boxes.length, 2);
+  assert.equal(matchedTokens.length, 2);
+  // "Nguyễn Văn A" spans x0=12..x1=138 => x=8, w=134
+  assert.ok(boxes.some((b) => b.x === 8 && b.w === 134));
+  // "0912 345 678" spans x0=192..x1=326 => x=188, w=142
+  assert.ok(boxes.some((b) => b.x === 188 && b.w === 142));
+});

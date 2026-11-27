@@ -52,7 +52,7 @@ export interface FollowUpMessage {
   latencyMs?: number;
 }
 
-const FALLBACK_CLOUD_MODEL = 'gemini-2.5-flash-lite';
+const FALLBACK_CLOUD_MODEL = 'gemini-3.5-flash-lite';
 const MAX_CACHE_ENTRIES = 24;
 const responseCache = new Map<string, HybridResponse>();
 
@@ -282,7 +282,7 @@ async function runSingleStream(
 export async function generateHybridStream(
   prompt: string,
   modeKey: ModeKey,
-  cloudModel = 'gemini-2.5-flash',
+  cloudModel = 'gemini-3.6-flash',
   image: AttachedImage | null = null,
   onChunk?: (partialText: string) => void,
   signal?: AbortSignal,
@@ -365,7 +365,7 @@ export async function generateFollowUpStream(
   history: FollowUpMessage[],
   redactedQuestion: string,
   modeKey: ModeKey,
-  cloudModel = 'gemini-2.5-flash',
+  cloudModel = 'gemini-3.6-flash',
   systemPromptStyle = 'concise_executive',
   onChunk?: (partialText: string) => void,
   signal?: AbortSignal
@@ -405,7 +405,7 @@ export async function detectEntitiesOnDevice(rawText: string): Promise<{
   const started = performance.now();
   try {
     const model = getGenerativeModel(ai, {
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       mode: InferenceMode.ONLY_ON_DEVICE,
     });
 

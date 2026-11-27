@@ -159,7 +159,7 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
 
     try {
       const tesseract = await import('tesseract.js');
-      const createdWorker = await tesseract.createWorker('eng', 1, {
+      const createdWorker = await tesseract.createWorker('eng+vie', 1, {
         logger: (m: { status?: string; progress?: number }) => {
           if (typeof m.progress === 'number') {
             setScanProgress(Math.max(5, Math.min(99, Math.round(m.progress * 100))));
@@ -328,6 +328,12 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
             </button>
           </div>
         </div>
+        <p
+          title="Mô hình OCR chỉ tải 1 lần; ảnh của bạn không bao giờ rời khỏi thiết bị"
+          className="mt-2 text-[11.5px] text-[var(--n-muted)]"
+        >
+          OCR model downloads once · your image never leaves this device
+        </p>
       </div>
     </div>
   );

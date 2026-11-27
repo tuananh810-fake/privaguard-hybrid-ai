@@ -42,7 +42,7 @@ export const remoteConfig = getRemoteConfig(app);
 remoteConfig.settings.minimumFetchIntervalMillis = 60_000;
 remoteConfig.defaultConfig = {
   default_inference_mode: 'PREFER_ON_DEVICE',
-  cloud_model: 'gemini-2.5-flash',
+  cloud_model: 'gemini-3.6-flash',
   system_prompt_style: 'concise_executive',
 };
 
@@ -58,14 +58,14 @@ export async function loadRemoteSettings(): Promise<RemoteSettings> {
     const activated = await fetchAndActivate(remoteConfig);
     return {
       defaultInferenceMode: getString(remoteConfig, 'default_inference_mode') || 'PREFER_ON_DEVICE',
-      cloudModel: getString(remoteConfig, 'cloud_model') || 'gemini-2.5-flash',
+      cloudModel: getString(remoteConfig, 'cloud_model') || 'gemini-3.6-flash',
       systemPromptStyle: getString(remoteConfig, 'system_prompt_style') || 'concise_executive',
       loadedFromServer: activated,
     };
   } catch {
     return {
       defaultInferenceMode: 'PREFER_ON_DEVICE',
-      cloudModel: 'gemini-2.5-flash',
+      cloudModel: 'gemini-3.6-flash',
       systemPromptStyle: 'concise_executive',
       loadedFromServer: false,
     };
