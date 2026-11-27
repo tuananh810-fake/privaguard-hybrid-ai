@@ -342,7 +342,6 @@ export default function App() {
     nanoScannedTextRef.current = null;
     setNanoScanNotice(null);
     setNanoScanTruncated(false);
-    setIsHistoricalView(false);
     setRawText(val);
   }, []);
 

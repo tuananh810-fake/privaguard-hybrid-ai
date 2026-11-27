@@ -2,14 +2,14 @@
 
 > **Use cloud AI on confidential docs — secrets never leave your browser.**
 
-![PrivaGuard AI v6.0 Workspace](docs/privaguard-v6-workspace.png)
+![PrivaGuard AI Workspace](docs/privaguard-v6-workspace.png)
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Firebase%20Hosting-0F7B6C?style=flat-square)](https://buildhybridai-tuananh.web.app)
 [![Built for](https://img.shields.io/badge/Hackathon-%23BuildHybridAI%202026-37352F?style=flat-square)](https://buildhybridai.devpost.com/)
 [![Firebase AI Logic](https://img.shields.io/badge/Firebase%20AI%20Logic-Hybrid%20Nano%20%2B%20Gemini%203.6%20Flash-DD2C00?style=flat-square)](https://firebase.google.com/docs/ai-logic)
 [![Tests](https://img.shields.io/badge/Unit%20Tests-16%2F16%20PASS-0F7B6C?style=flat-square)](#benchmarks--verification)
 
-**Live App:** https://buildhybridai-tuananh.web.app
+**Live App:** https://buildhybridai-tuananh.web.app · **User Guide:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
 
 ---
 
@@ -60,7 +60,7 @@ flowchart LR
 - **Honest Nano Truncation Metadata & Always-Visible Diff Bar:** Reports exact character coverage (`scannedChars` / `totalChars`) when documents exceed Nano's 5,160-char local chunk budget so users know to mark later names manually. The Diff/Payload Nano bar stays visible across all browsers with a 1-click **Enable Gemini Nano →** guide.
 - **Read-Only Historical Cloud Snapshot Mode:** Opening a saved Firestore report locks re-hydration and follow-up chat with an **`Anonymized Cloud Snapshot · Original secrets were never persisted (RAM-only vault)`** callout—preventing cross-document token substitution and proving zero raw PII persistence.
 - **On-Device Nano Scan for Follow-Up Questions & Immutable SHA-256 Proof:** Follow-up questions also run local Nano semantic PII discovery (2.5 s timeout, non-blocking fallback) before masking, and `.md` exports hash the immutable run payload snapshot captured at inference time.
-- **Firestore Payload Sanitizer & Full PWA/OG Assets:** `sanitizeAnalysisPayload` clamps every save field to `firestore.rules` bounds (`historySanitizer.ts`); added `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`, `og-image.png`, Open Graph/Twitter cards, and `privaguard-shell-v6.2.0` Service Worker caching.
+- **Firestore Payload Sanitizer & Full PWA/OG Assets:** `sanitizeAnalysisPayload` clamps every save field to `firestore.rules` bounds (`historySanitizer.ts`); added `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`, `og-image.png`, Open Graph/Twitter cards, and `privaguard-shell-v6.2.3` Service Worker caching.
 - **Pre-Send Nano Scan & On-Device System Prompts (`v6.1`):** Click **Scan semantic PII (Nano)** inside Diff or Payload to preview `source: Nano` chips *before* sending; `onDeviceParams.createOptions.initialPrompts` preserves `[TOKEN_N]` placeholders offline; `rawPiiBytesSent` measures exact UTF-8 byte lengths via `TextEncoder`.
 - **Gemini Nano Semantic PII Discovery (`src/services/nanoEntityDiscovery.ts`):** Uses `InferenceMode.ONLY_ON_DEVICE` to extract `PERSON`, `ORG`, `ADDRESS`, and `LOCATION` entities (EN + VI diacritics) before cloud inference, with a 5 s timeout, verbatim anti-hallucination check, and regex span deduplication.
 - **Transparent Engine & Availability UX:** Detects Nano availability at startup; shows a calm `"Gemini Nano ready"` badge when available or a dismissible Notion banner with official Chrome setup instructions when unavailable. Every result explicitly displays `Ran on: Device (Nano)` or `Ran on: Cloud (<model>)`.
