@@ -12,6 +12,8 @@ import {
   parseStructuredAudit,
   structuredAuditToMarkdown,
 } from '../src/services/hybridHelpers.ts';
+import { matchPiiBoxesFromOcrLines } from '../src/services/ocrPiiMatcher.ts';
+import { classifyDroppedFile, getFileExtension } from '../src/services/documentParser.ts';
 
 test('redacts JWT, PEM private key, and DB connection URI with zero leaks', () => {
   const jwt =
@@ -117,4 +119,53 @@ test('hybridHelpers: parseStructuredAudit, structuredAuditToMarkdown, extractRis
   assert.ok(prompt.includes('attached image'));
 
   assert.equal(parseStructuredAudit('not-valid-json'), null);
+});
+
+test('v5.0 ocrPiiMatcher: maps OCR word bboxes with 4px padding for email, phone, and custom names', () => {
+  const lines = [
+    {
+      text: 'Contact Tuan Anh at alice@corp.io or +84 912-345-678',
+      bbox: { x0: 10, y0: 20, x1: 420, y1: 40 },
+      words: [
+        { text: 'Contact', bbox: { x0: 10, y0: 20, x1: 60, y1: 40 } },
+        { text: 'Tuan', bbox: { x0: 66, y0: 20, x1: 100, y1: 40 } },
+        { text: 'Anh', bbox: { x0: 104, y0: 20, x1: 132, y1: 40 } },
+        { text: 'at', bbox: { x0: 138, y0: 20, x1: 152, y1: 40 } },
+        { text: 'alice@corp.io', bbox: { x0: 158, y0: 20, x1: 250, y1: 40 } },
+        { text: 'or', bbox: { x0: 256, y0: 20, x1: 270, y1: 40 } },
+        { text: '+84', bbox: { x0: 276, y0: 20, x1: 302, y1: 40 } },
+        { text: '912-345-678', bbox: { x0: 308, y0: 20, x1: 410, y1: 40 } },
+      ],
+    },
+    {
+      text: 'Safe line with no secrets at all',
+      bbox: { x0: 10, y0: 50, x1: 260, y1: 70 },
+      words: [{ text: 'Safe', bbox: { x0: 10, y0: 50, x1: 40, y1: 70 } }],
+    },
+  ];
+
+  const { boxes, matchedTokens } = matchPiiBoxesFromOcrLines(
+    lines,
+    ['Tuan Anh'],
+    DEFAULT_CATEGORY_FILTER,
+    { padding: 4, canvasWidth: 500, canvasHeight: 200 }
+  );
+
+  assert.equal(boxes.length, 3);
+  assert.equal(matchedTokens.length, 3);
+  // Email box: x0=158-4=154, y0=20-4=16, x1=250+4=254 => w=100, h=28
+  assert.ok(boxes.some((b) => b.x === 154 && b.y === 16 && b.w === 100 && b.h === 28));
+  // Multi-word custom name "Tuan Anh": x0=66-4=62, x1=132+4=136 => w=74
+  assert.ok(boxes.some((b) => b.x === 62 && b.w === 74));
+  // Multi-word VN phone "+84 912-345-678": x0=276-4=272, x1=410+4=414 => w=142
+  assert.ok(boxes.some((b) => b.x === 272 && b.w === 142));
+});
+
+test('v5.0 documentParser: classifies PDF, DOCX, TXT, Image, and unsupported files accurately', () => {
+  assert.equal(getFileExtension('Contract.V2.PDF'), 'pdf');
+  assert.equal(classifyDroppedFile({ name: 'nda.pdf', type: 'application/pdf' }), 'pdf');
+  assert.equal(classifyDroppedFile({ name: 'brief.docx' }), 'docx');
+  assert.equal(classifyDroppedFile({ name: 'prod.env' }), 'text');
+  assert.equal(classifyDroppedFile({ name: 'receipt.webp', type: 'image/webp' }), 'image');
+  assert.equal(classifyDroppedFile({ name: 'archive.zip', type: 'application/zip' }), 'unsupported');
 });

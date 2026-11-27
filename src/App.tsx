@@ -34,6 +34,7 @@ import {
   ModeKey,
   NanoAvailability,
 } from './services/hybridAI';
+import { classifyDroppedFile, parseDocumentLocally } from './services/documentParser';
 import type { SavedAnalysis } from './services/historyStore';
 import { TechDrawer } from './components/TechDrawer';
 import { DocumentInputPanel, InputTabKey } from './components/DocumentInputPanel';
@@ -60,6 +61,8 @@ export default function App() {
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
   const [imageMaskCount, setImageMaskCount] = useState(0);
   const [showImageRedactor, setShowImageRedactor] = useState(false);
+  const [extractingFile, setExtractingFile] = useState(false);
+  const [fileMeta, setFileMeta] = useState<string | null>(null);
 
   const [mode, setMode] = useState<ModeKey>('PREFER_ON_DEVICE');
   const [task, setTask] = useState<AnalysisTask>('risk_audit');
@@ -256,6 +259,7 @@ export default function App() {
     abortRef.current?.abort();
     setRunning(false);
     setRawText(content);
+    setFileMeta(null);
     setResult(null);
     setStreamingText('');
     setFollowUps([]);
@@ -269,28 +273,30 @@ export default function App() {
     setCategories((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
-  const handleTextFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      abortRef.current?.abort();
-      setRawText(String(reader.result || ''));
+  const processDocumentFile = useCallback(async (file: File) => {
+    abortRef.current?.abort();
+    setRunning(false);
+    setExtractingFile(true);
+    setErrorMsg(null);
+    try {
+      const parsed = await parseDocumentLocally(file);
+      setRawText(parsed.text);
+      setFileMeta(parsed.meta);
       setResult(null);
       setStreamingText('');
       setFollowUps([]);
       setExtraFollowUpVault([]);
       setFollowUpStreaming('');
-      setErrorMsg(null);
+      setSavedNotice(null);
       setInputTab('original');
-    };
-    reader.readAsText(file);
-    e.target.value = '';
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExtractingFile(false);
+    }
   }, []);
 
-  const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processImageFile = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = String(reader.result || '');
@@ -305,8 +311,41 @@ export default function App() {
       setShowImageRedactor(true);
     };
     reader.readAsDataURL(file);
-    e.target.value = '';
   }, []);
+
+  const handleTextFileUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        processDocumentFile(file);
+      }
+      e.target.value = '';
+    },
+    [processDocumentFile]
+  );
+
+  const handleImageUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        processImageFile(file);
+      }
+      e.target.value = '';
+    },
+    [processImageFile]
+  );
+
+  const handleFileDrop = useCallback(
+    (file: File) => {
+      const kind = classifyDroppedFile(file);
+      if (kind === 'image') {
+        processImageFile(file);
+      } else {
+        processDocumentFile(file);
+      }
+    },
+    [processDocumentFile, processImageFile]
+  );
 
   const handleRunPipeline = useCallback(async () => {
     if (!rawText.trim()) return;
@@ -492,16 +531,42 @@ export default function App() {
     setTimeout(() => setCopied(false), 1800);
   }, [displayedMarkdown]);
 
-  const handleExportMarkdown = useCallback(() => {
+  const handleExportMarkdown = useCallback(async () => {
     if (!displayedMarkdown) return;
-    const blob = new Blob([displayedMarkdown], { type: 'text/markdown;charset=utf-8' });
+    let payloadHash = 'unavailable';
+    try {
+      if (typeof crypto !== 'undefined' && crypto.subtle) {
+        const bytes = new TextEncoder().encode(redaction.redactedText);
+        const digest = await crypto.subtle.digest('SHA-256', bytes);
+        payloadHash = Array.from(new Uint8Array(digest))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+      }
+    } catch {
+      payloadHash = 'unavailable';
+    }
+
+    const verificationFooter = [
+      '\n\n---',
+      '### PrivaGuard Zero-Leak Verification',
+      `- **Timestamp (UTC):** ${new Date().toISOString()}`,
+      `- **Inference Source:** ${result?.inferenceSource === 'ON_DEVICE' ? 'On-Device Gemini Nano' : result?.modelUsed || 'Firebase AI Logic'}`,
+      `- **PII Items Shielded Locally:** ${combinedVault.length}`,
+      `- **Private Bytes Protected in RAM:** ${redaction.bytesShielded} bytes`,
+      `- **Raw PII Leaked:** ${leakCheck} bytes`,
+      `- **Sanitized Payload SHA-256:** \`${payloadHash}\``,
+    ].join('\n');
+
+    const blob = new Blob([displayedMarkdown + verificationFooter], {
+      type: 'text/markdown;charset=utf-8',
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `privaguard-${task}-${Date.now()}.md`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [displayedMarkdown, task]);
+  }, [displayedMarkdown, task, redaction.redactedText, redaction.bytesShielded, result, combinedVault.length, leakCheck]);
 
   const handleSaveToFirestore = useCallback(async () => {
     if (!result) return;
@@ -626,6 +691,10 @@ export default function App() {
             onSelectSample={handleSelectSample}
             onTextFileUpload={handleTextFileUpload}
             onImageUpload={handleImageUpload}
+            onFileDrop={handleFileDrop}
+            extractingFile={extractingFile}
+            fileMeta={fileMeta}
+            onClearFileMeta={() => setFileMeta(null)}
             inputTab={inputTab}
             onInputTabChange={setInputTab}
             redaction={redaction}
@@ -708,6 +777,8 @@ export default function App() {
         <Suspense fallback={null}>
           <ImageRedactorModal
             image={attachedImage}
+            extraTerms={extraTerms}
+            categories={categories}
             onApply={(redactedImg, count) => {
               setAttachedImage(redactedImg);
               setImageMaskCount((prev) => prev + count);

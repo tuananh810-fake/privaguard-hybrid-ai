@@ -10,6 +10,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Square,
+  Upload,
   X,
 } from 'lucide-react';
 import { SAMPLE_DOCUMENTS } from '../data/samples';
@@ -32,6 +33,10 @@ interface DocumentInputPanelProps {
   onSelectSample: (content: string) => void;
   onTextFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFileDrop: (file: File) => void;
+  extractingFile: boolean;
+  fileMeta: string | null;
+  onClearFileMeta: () => void;
   inputTab: InputTabKey;
   onInputTabChange: (tab: InputTabKey) => void;
   redaction: RedactionResult;
@@ -97,6 +102,10 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     onSelectSample,
     onTextFileUpload,
     onImageUpload,
+    onFileDrop,
+    extractingFile,
+    fileMeta,
+    onClearFileMeta,
     inputTab,
     onInputTabChange,
     redaction,
@@ -116,7 +125,9 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     const textFileRef = useRef<HTMLInputElement>(null);
     const imageFileRef = useRef<HTMLInputElement>(null);
     const attachMenuRef = useRef<HTMLDivElement>(null);
+    const dragDepthRef = useRef(0);
     const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
 
     useEffect(() => {
       if (!attachMenuOpen) return;
@@ -136,8 +147,59 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
       };
     }, [attachMenuOpen]);
 
+    function handleDragEnter(e: React.DragEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepthRef.current += 1;
+      if (e.dataTransfer.types.includes('Files')) {
+        setIsDragging(true);
+      }
+    }
+
+    function handleDragOver(e: React.DragEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    function handleDragLeave(e: React.DragEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) {
+        setIsDragging(false);
+      }
+    }
+
+    function handleDrop(e: React.DragEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepthRef.current = 0;
+      setIsDragging(false);
+      const file = e.dataTransfer.files?.[0];
+      if (file) onFileDrop(file);
+    }
+
     return (
-      <section className="flex min-h-[calc(100vh-49px)] flex-col bg-[var(--n-bg)] px-6 py-7 sm:px-10 lg:border-r lg:border-[var(--n-border)]">
+      <section
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className="relative flex min-h-[calc(100vh-49px)] flex-col bg-[var(--n-bg)] px-6 py-7 sm:px-10 lg:border-r lg:border-[var(--n-border)]"
+      >
+        {/* Subtle Notion Drag & Drop Overlay */}
+        {isDragging && (
+          <div className="pointer-events-none absolute inset-3 z-30 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--n-accent)] bg-[var(--n-bg)]/95 p-6 text-center">
+            <Upload className="mb-2.5 h-6 w-6 text-[var(--n-accent)]" />
+            <p className="text-[14.5px] font-medium text-[var(--n-text)]">
+              Drop PDF, Word, text or image — processed 100% on this device
+            </p>
+            <p className="mt-1 text-[12.5px] text-[var(--n-muted)]">
+              Zero raw files uploaded to any server
+            </p>
+          </div>
+        )}
+
         {/* Notion Page Heading + Subtle Template Chips */}
         <div className="mb-5">
           <h2 className="text-[22px] font-bold tracking-tight text-[var(--n-text)]">Document</h2>
@@ -221,6 +283,34 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
           </div>
         </div>
 
+        {/* Local Extraction Status / Meta Line */}
+        {extractingFile && (
+          <div
+            aria-live="polite"
+            className="mb-2 flex items-center gap-2 rounded-md bg-[var(--n-surface)] px-3 py-1.5 text-[12.5px] text-[var(--n-text)]"
+          >
+            <RefreshCw className="h-3.5 w-3.5 animate-spin text-[var(--n-accent)]" />
+            Extracting locally…
+          </div>
+        )}
+
+        {fileMeta && !extractingFile && (
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-[var(--n-surface)] px-3 py-1.5 text-[12px] text-[var(--n-muted)]">
+            <span className="flex items-center gap-1.5 truncate">
+              <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--n-accent)]" />
+              <span className="truncate">{fileMeta}</span>
+            </span>
+            <button
+              type="button"
+              onClick={onClearFileMeta}
+              aria-label="Dismiss file info"
+              className="rounded p-0.5 hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+
         {/* Clean Notion Editorial Surface */}
         <div className="flex flex-1 flex-col">
           {inputTab === 'original' ? (
@@ -228,7 +318,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               value={rawText}
               onChange={(e) => onRawTextChange(e.target.value)}
               rows={13}
-              placeholder="Paste any private note, log, contract, or medical record here. Sensitive details are hidden automatically on this device..."
+              placeholder="Paste text or drop a PDF, Word (.docx), log file, or image here. Everything is processed 100% on this device..."
               className="w-full flex-1 resize-none bg-transparent py-2 text-[14.5px] leading-[1.65] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none"
             />
           ) : inputTab === 'safe' ? (
@@ -243,14 +333,16 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               <div className="overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 text-[13.5px] leading-relaxed">
                 <div className="mb-2 flex items-center justify-between text-[12px] font-medium text-[var(--n-muted)]">
                   <span>On this device</span>
-                  <span className="font-mono text-[var(--n-danger)]">{redaction.bytesShielded}B private</span>
+                  <span className="font-mono tabular-nums text-[var(--n-danger)]">
+                    {redaction.bytesShielded}B private
+                  </span>
                 </div>
                 <HighlightedRawPii rawText={rawText} vault={redaction.vault} />
               </div>
               <div className="overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 text-[13.5px] leading-relaxed">
                 <div className="mb-2 flex items-center justify-between text-[12px] font-medium text-[var(--n-muted)]">
                   <span>Sent to AI</span>
-                  <span className="font-mono text-[var(--n-accent)]">
+                  <span className="font-mono tabular-nums text-[var(--n-accent)]">
                     {leakCheck === 0 ? '0B leaked' : `${leakCheck} leaks`}
                   </span>
                 </div>
@@ -282,7 +374,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                   <div className="text-[12px] text-[var(--n-muted)]">
                     {imageMaskCount > 0
                       ? `${imageMaskCount} area${imageMaskCount > 1 ? 's' : ''} hidden locally`
-                      : 'Click Hide areas to cover private text'}
+                      : 'Click Hide areas to auto-detect or cover private text'}
                   </div>
                 </div>
               </div>
@@ -310,11 +402,10 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
         {/* Quiet Bottom Action Toolbar */}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5 border-t border-[var(--n-border)] pt-4">
           <div className="flex items-center gap-2">
-            {/* Hidden file inputs */}
             <input
               ref={textFileRef}
               type="file"
-              accept=".txt,.md,.log,.json,.env,.csv"
+              accept=".pdf,.docx,.txt,.md,.log,.json,.env,.csv"
               onChange={onTextFileUpload}
               className="hidden"
             />
@@ -341,7 +432,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               {attachMenuOpen && (
                 <div
                   role="menu"
-                  className="absolute bottom-full left-0 z-20 mb-1.5 w-44 rounded-lg border border-[var(--n-border)] bg-[var(--n-bg)] p-1"
+                  className="absolute bottom-full left-0 z-20 mb-1.5 w-56 rounded-lg border border-[var(--n-border)] bg-[var(--n-bg)] p-1"
                 >
                   <button
                     type="button"
@@ -352,8 +443,8 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                     }}
                     className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-[var(--n-text)] hover:bg-[var(--n-hover)]"
                   >
-                    <FileText className="h-3.5 w-3.5 text-[var(--n-muted)]" />
-                    Text or log file
+                    <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--n-muted)]" />
+                    Document (PDF, DOCX, TXT)
                   </button>
                   <button
                     type="button"
@@ -364,14 +455,13 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                     }}
                     className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-[var(--n-text)] hover:bg-[var(--n-hover)]"
                   >
-                    <ImageIcon className="h-3.5 w-3.5 text-[var(--n-muted)]" />
-                    Image (with mask)
+                    <ImageIcon className="h-3.5 w-3.5 shrink-0 text-[var(--n-muted)]" />
+                    Image (with auto-mask)
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Compact Goal Dropdown */}
             <select
               aria-label="Analysis goal"
               value={task}
@@ -401,7 +491,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
             <button
               type="button"
               onClick={onRunPipeline}
-              disabled={running || !rawText.trim()}
+              disabled={running || extractingFile || !rawText.trim()}
               title="Shortcut: Ctrl + Enter"
               className="inline-flex items-center gap-1.5 rounded-md bg-[var(--n-accent)] px-4 py-1.5 text-[13.5px] font-medium text-[var(--n-accent-fg)] transition hover:bg-[var(--n-accent-hover)] disabled:cursor-not-allowed disabled:opacity-45"
             >
