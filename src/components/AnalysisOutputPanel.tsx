@@ -714,6 +714,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                 busy={exportingSafeFile}
                 disabled={isHistoricalView || running}
                 align="left"
+                placement="up"
                 title={
                   isHistoricalView
                     ? 'Original document is never stored in cloud (RAM-only) — open or upload a document to export'

@@ -15,6 +15,7 @@ interface ExportMenuButtonProps {
   disabled?: boolean;
   busy?: boolean;
   align?: 'left' | 'right';
+  placement?: 'down' | 'up';
   size?: 'xs' | 'sm';
   title?: string;
 }
@@ -26,6 +27,7 @@ export const ExportMenuButton: React.FC<ExportMenuButtonProps> = ({
   disabled = false,
   busy = false,
   align = 'right',
+  placement = 'down',
   size = 'sm',
   title,
 }) => {
@@ -78,9 +80,9 @@ export const ExportMenuButton: React.FC<ExportMenuButtonProps> = ({
       {open && (
         <div
           role="menu"
-          className={`absolute z-30 mt-1.5 w-56 rounded-lg border border-[var(--n-border)] bg-[var(--n-bg)] p-1 shadow-lg ${
-            align === 'right' ? 'right-0' : 'left-0'
-          }`}
+          className={`absolute z-30 w-64 rounded-lg border border-[var(--n-border)] bg-[var(--n-bg)] p-1 shadow-lg ${
+            placement === 'up' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+          } ${align === 'right' ? 'right-0' : 'left-0'}`}
         >
           {options.map((opt) => (
             <button
