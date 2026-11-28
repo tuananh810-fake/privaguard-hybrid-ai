@@ -20,7 +20,7 @@ export interface NanoDiscoveryResult {
 export const NANO_CHUNK_SIZE = 1800;
 export const NANO_CHUNK_OVERLAP = 120;
 export const NANO_MAX_CHUNKS = 3;
-export const NANO_MANUAL_SCAN_TIMEOUT_MS = 20_000;
+export const NANO_MANUAL_SCAN_TIMEOUT_MS = 30_000;
 export const NANO_AUTO_SCAN_TIMEOUT_MS = 12_000;
 export const NANO_FOLLOWUP_SCAN_TIMEOUT_MS = 5_000;
 

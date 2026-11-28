@@ -461,10 +461,15 @@ export async function generateHybridStream(
     responseCache.set(cacheKey, entry);
   };
 
+  const primaryAttemptMode: ModeKey =
+    modeKey === 'PREFER_IN_CLOUD' && activeCloudModel !== FALLBACK_CLOUD_MODEL
+      ? 'ONLY_IN_CLOUD'
+      : modeKey;
+
   try {
     const res = await runSingleStream(
       parts,
-      modeKey,
+      primaryAttemptMode,
       activeCloudModel,
       systemPromptStyle,
       started,
@@ -517,10 +522,9 @@ export async function generateHybridStream(
       modeKey !== 'ONLY_ON_DEVICE'
     ) {
       const isTimeout = err instanceof Error && err.message.includes('CLOUD_TTFT_TIMEOUT');
-      if (isTimeout) {
-        markCloudModelStalled(stalledCloudModels, activeCloudModel);
-      } else {
-        await sleepWithAbort(600, signal);
+      markCloudModelStalled(stalledCloudModels, activeCloudModel);
+      if (!isTimeout) {
+        await sleepWithAbort(300, signal);
       }
       const fallbackRes = await runSingleStream(
         parts,

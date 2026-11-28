@@ -61,16 +61,16 @@ PrivaGuard AI is a calm, Notion-style Hybrid AI workspace where **0 detected PII
 
 ---
 
-## Demo Video v2 Storyboard *(timestamps to be finalized after video v2 recording)*
+## Demo Video v2 Storyboard (`2:21`, 1080p 30fps — `submission-pack/privaguard-demo-v2.mp4`)
 
-| Segment | Chapter | What Judges See |
+| Timestamp | Chapter | What Judges See |
 |---|---|---|
-| **Intro** | **Hybrid Privacy Vision** | Confidential contract risk → on-device Gemini Nano local RAM shield → only safe placeholder tokens travel to Cloud Gemini (`0 detected PII leaked`). |
-| **Step 1 / 4** | **NDA PDF, Regex Diff, Nano Scan & Payload** | Live on Firebase Hosting (`Gemini Nano ready`) → **NDA PDF** (`nda-sample.pdf`, 2 pages extracted locally, 11 regex entities masked) → **Diff** → **Scan semantic PII (Nano)** (free-form names/orgs/addresses masked locally) → **Payload** (`0 detected PII included`). |
-| **Step 2 / 4** | **Fast Cloud Risk Card, Peek, Restore & Snapshot** | Inline mode pill → **Fast Cloud** → **Analyze safely** → typed Risk Card (`Critical · Score 92/100`, SOC2/GDPR/HIPAA/PCI-DSS/OWASP badges, checklist, `Ran on: Cloud (gemini-3.5-flash-lite)`, `Raw PII bytes sent: 0 B`) → click-to-**Peek** a token chip → toggle **Show real names** → open read-only **Anonymized Cloud Snapshot** from the **History** drawer. |
-| **Step 3 / 4** | **Client-Side Auto-OCR Image Redaction** | **ID image** (employee ID card) → **Hide areas** → **Auto-detect PII** (`tesseract.js` locally draws **3** solid black redaction boxes) → **Apply mask** attaches only the redacted image. |
-| **Step 4 / 4** | **Strict Offline Mode & On-Device Nano (`0 B`)** | Inline mode pill → **Strict Offline** → **Analyze safely** executes entirely on **`Device (Nano)`** with **`0 B`** sent to the cloud, backed by `privaguard-shell-v6.3.2`. |
-| **Outro** | **Architecture & Verified Benchmarks** | Cloud-only vs On-device-only vs PrivaGuard Hybrid comparison, `100.0% F1`, `23/23` unit tests, `0.261 ms/doc`, `45.31 kB` gzip bundle, Firebase stack & live links. |
+| **0:00 – 0:18** | **Hybrid Privacy Vision (Intro)** | Confidential contract risk → on-device Gemini Nano local RAM shield → only safe placeholder tokens travel to Cloud Gemini (`0 detected PII leaked`). |
+| **0:18 – 0:45** | **Step 1 / 4 — Local 3-Layer Shield** | Live on Firebase Hosting (`● Gemini Nano` & `● Hybrid`) → **NDA PDF** (`nda-sample.pdf`, 2 pages extracted locally, 11 regex entities) → **Diff** → **Scan semantic PII (Nano)** catches **6** real semantic entities locally (`[ORG_1]`, `[ADDRESS_1]`, `[PERSON_2]`, `[ORG_2]`, `[ADDRESS_2]`, `[PERSON_1]` → `rx 11 · Na 6 · man 0`, `Safe preview (17)`) → **Payload** (`0 detected PII included`). |
+| **0:45 – 1:20** | **Step 2 / 4 — Hybrid Cloud Audit & Snapshot** | Inline mode pill (`Auto Hybrid \| Fast Cloud \| Strict Offline`) → **Fast Cloud** → **Analyze safely** → automatic Lite fallback (`Ran on: Cloud (gemini-3.5-flash-lite)`, `3.3s` latency, `2.4s` TTFT, `Masked 17 (11/6/0)`, **`Raw PII bytes sent: 0 B`**) returns typed Risk Card (`High · Score 85/100`, `GDPR · PCI-DSS · SOC2 · OWASP`) → **Show real names** restores real secrets from RAM → **Save** → **History** drawer opens read-only **Anonymized Cloud Snapshot**. |
+| **1:20 – 1:37** | **Step 3 / 4 — Local Auto-OCR Image Redaction** | **ID image** (`id-card-sample.png`) → **Hide areas** → **Auto-detect PII** (`tesseract.js` locally draws **3** solid black `[HIDDEN]` boxes over National ID, Phone, and Email) → **Apply mask (3)** attaches only the redacted image. |
+| **1:37 – 2:01** | **Step 4 / 4 — True Offline Mode & On-Device Nano (`0 B`)** | **DevOps log** → real browser network disconnect flips top-bar to **`● Offline · On-device`** → **Strict Offline** → **Analyze safely** runs both semantic masking (`rx 6 · Na 1`, catching `Nguyen Tuan Anh`) and the full security audit entirely on **`Device (Nano)`** (`1.2s` TTFT, **`Bytes to cloud: 0 B`**, **`Raw PII bytes sent: 0 B`**). |
+| **2:01 – 2:21** | **Outro — Architecture & Verified Benchmarks** | Cloud-only vs On-device-only vs PrivaGuard Hybrid comparison, `100.0% F1`, `23/23` unit tests, `0.26 ms/doc`, `45.33 kB` gzip bundle, Firebase stack & live links. |
 
 ---
 
@@ -89,4 +89,4 @@ PrivaGuard AI is a calm, Notion-style Hybrid AI workspace where **0 detected PII
   4. `03-cloud-snapshot-audit.png`
   5. `04-auto-ocr-id-redaction.png`
   6. `05-strict-offline-guard.png`
-- **Demo Video:** Upload final `submission-pack/privaguard-demo-v2.mp4` (1080p, `< 3:00`, burned-in English captions; pending final recording pass) to YouTube (Public/Unlisted) and paste the URL into Devpost.
+- **Demo Video:** Upload `submission-pack/privaguard-demo-v2.mp4` (`2:21`, 1080p 30fps, burned-in English captions) — or `privaguard-demo-v2-clean.mp4` + `privaguard-demo-v2.srt` — to YouTube (Public/Unlisted) and paste the URL into Devpost.

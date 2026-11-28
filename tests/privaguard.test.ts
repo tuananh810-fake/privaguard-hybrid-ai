@@ -404,7 +404,7 @@ test('v6.2 buildNanoChunkPlan: reports exact character coverage and truncation o
 });
 
 test('v6.3 discoverSemanticEntitiesWithNano: reports timedOut=true on slow Nano, respects custom timeoutMs, and distinguishes AbortController cancel', async () => {
-  assert.equal(NANO_MANUAL_SCAN_TIMEOUT_MS, 20_000);
+  assert.equal(NANO_MANUAL_SCAN_TIMEOUT_MS, 30_000);
   assert.equal(NANO_AUTO_SCAN_TIMEOUT_MS, 12_000);
 
   const sampleText =
