@@ -489,7 +489,7 @@ export async function exportSanitizedDocumentAs(
     : `privaguard-safe-${Date.now()}`;
   const safeStem = baseStem.toLowerCase().startsWith('safe-') ? baseStem : `safe-${baseStem}`;
 
-  // Cross-format DOCX -> Redacted PDF (preserves Word headings, tables, bold, lists, images & Unicode!)
+  // Cross-format DOCX -> Redacted PDF (preserves Word headings, tables, bold, lists, images & Unicode, zero PrivaGuard chrome!)
   if (targetFormat === 'pdf' && originalFile && origExt === 'docx') {
     const buffer = await originalFile.arrayBuffer();
     const redactedDocx = await redactDocxBuffer(buffer, {
@@ -499,7 +499,8 @@ export async function exportSanitizedDocumentAs(
     const pdfBytes = await renderRedactedDocxToPdfBytes(
       redactedDocx.bytes,
       safeStem,
-      redactedDocx.analysis.activeVault.length
+      redactedDocx.analysis.activeVault.length,
+      false
     );
     const mimeType = 'application/pdf';
     return {
@@ -516,7 +517,7 @@ export async function exportSanitizedDocumentAs(
   const analysis = analyzeWithContextGuard(rawText, options);
 
   if (targetFormat === 'docx') {
-    const bytes = await buildNativeDocxBytes(safeStem, analysis.redactedText);
+    const bytes = await buildNativeDocxBytes('', analysis.redactedText, false);
     const mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     return {
       blob: new Blob([bytes.buffer as ArrayBuffer], { type: mimeType }),
@@ -550,9 +551,10 @@ export async function exportSanitizedDocumentAs(
             structuredKind,
             textForPdf,
             safeStem,
-            analysis.activeVault.length
+            analysis.activeVault.length,
+            false
           )
-        : await buildCleanPdfBytes(safeStem, textForPdf);
+        : await buildCleanPdfBytes('', textForPdf, false);
     const mimeType = 'application/pdf';
     return {
       blob: new Blob([bytes.buffer as ArrayBuffer], { type: mimeType }),

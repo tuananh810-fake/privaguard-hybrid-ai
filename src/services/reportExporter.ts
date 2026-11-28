@@ -112,12 +112,17 @@ function buildDocxParagraphXml(line: string): string {
  * Generates a valid, standards-compliant native OpenXML `.docx` document from structured text/Markdown.
  * Uses JSZip (already installed) with zero external dependencies and clean scrubbed metadata.
  */
-export async function buildNativeDocxBytes(title: string, bodyText: string): Promise<Uint8Array> {
+export async function buildNativeDocxBytes(
+  title: string,
+  bodyText: string,
+  includeTitle = true
+): Promise<Uint8Array> {
   const jszipMod = await import('jszip');
   const JSZip = jszipMod.default ?? jszipMod;
   const zip = new JSZip();
 
-  const lines = [`# ${title}`, '', ...bodyText.split(/\r?\n/)];
+  const rawLines = bodyText.split(/\r?\n/);
+  const lines = includeTitle && title.trim() ? [`# ${title}`, '', ...rawLines] : rawLines;
   const bodyXml = lines.map(buildDocxParagraphXml).join('');
 
   zip.file(
@@ -197,15 +202,19 @@ function wrapLine(text: string, maxChars: number): string[] {
 /**
  * Generates a clean, paginated, metadata-stripped PDF document via pdf-lib.
  */
-export async function buildCleanPdfBytes(title: string, bodyText: string): Promise<Uint8Array> {
+export async function buildCleanPdfBytes(
+  title: string,
+  bodyText: string,
+  includeTitle = true
+): Promise<Uint8Array> {
   const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
   const pdf = await PDFDocument.create();
   pdf.setTitle('');
   pdf.setAuthor('');
   pdf.setSubject('');
   pdf.setKeywords([]);
-  pdf.setCreator('PrivaGuard AI');
-  pdf.setProducer('PrivaGuard AI Local Exporter');
+  pdf.setCreator('');
+  pdf.setProducer('');
 
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -225,15 +234,16 @@ export async function buildCleanPdfBytes(title: string, bodyText: string): Promi
     }
   };
 
-  // Document header
-  page.drawText(toPdfSafeText(title), {
-    x: marginX,
-    y,
-    size: 15,
-    font: bold,
-    color: rgb(0.06, 0.46, 0.43),
-  });
-  y -= 24;
+  if (includeTitle && title.trim()) {
+    page.drawText(toPdfSafeText(title), {
+      x: marginX,
+      y,
+      size: 15,
+      font: bold,
+      color: rgb(0.06, 0.46, 0.43),
+    });
+    y -= 24;
+  }
 
   const rawLines = bodyText.split(/\r?\n/);
   for (const rawLine of rawLines) {
@@ -362,10 +372,11 @@ export async function exportAnalysisReport(
       'md',
       fullMarkdown,
       `PrivaGuard AI Report (${input.task})`,
-      input.vaultCount
+      input.vaultCount,
+      true
     );
   } else {
-    bytes = await buildCleanPdfBytes(`PrivaGuard AI Report (${input.task})`, fullMarkdown);
+    bytes = await buildCleanPdfBytes(`PrivaGuard AI Report (${input.task})`, fullMarkdown, true);
   }
   const mimeType = 'application/pdf';
   return {

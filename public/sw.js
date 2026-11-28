@@ -1,4 +1,4 @@
-const CACHE_NAME = 'privaguard-shell-v7.1.0';
+const CACHE_NAME = 'privaguard-shell-v7.2.0';
 const APP_SHELL_URLS = [
   '/',
   '/index.html',

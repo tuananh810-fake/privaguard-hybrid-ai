@@ -40,7 +40,6 @@ import {
   NanoAvailability,
 } from './services/hybridAI';
 import type { ManualPdfBox, SafeDocumentExportFormat } from './services/fileRedactor';
-import type { ReportExportFormat } from './services/reportExporter';
 import type { NanoDiscoveredEntity, NanoDiscoveryResult } from './services/nanoEntityDiscovery';
 import { classifyDroppedFile, parseDocumentLocally } from './services/documentParser';
 import type { SavedAnalysis } from './services/historyStore';
@@ -97,7 +96,7 @@ export default function App() {
   const [fileMeta, setFileMeta] = useState<string | null>(null);
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [exportingSafeFile, setExportingSafeFile] = useState(false);
-  const [exportingReport, setExportingReport] = useState(false);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   const [mode, setMode] = useState<ModeKey>('PREFER_ON_DEVICE');
   const [cloudModelPref, setCloudModelPref] = useState<CloudModelPreference>('auto');
@@ -464,6 +463,7 @@ export default function App() {
       setFollowUpStreaming('');
       setErrorMsg(null);
       setSavedNotice(null);
+      setExportNotice(null);
     },
     [cancelPendingStreamFrame]
   );
@@ -570,6 +570,7 @@ export default function App() {
         setExtraFollowUpVault([]);
         setFollowUpStreaming('');
         setSavedNotice(null);
+        setExportNotice(null);
         setInputTab('preview');
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : String(err));
@@ -919,57 +920,6 @@ export default function App() {
     setTimeout(() => setCopied(false), 1800);
   }, [displayedMarkdown, result?.nanoUnavailable, result?.wasMockEcho]);
 
-  const handleExportReport = useCallback(
-    async (format: ReportExportFormat) => {
-      if (!displayedMarkdown || result?.nanoUnavailable || result?.wasMockEcho || exportingReport) return;
-      setExportingReport(true);
-      setErrorMsg(null);
-      try {
-        const { exportAnalysisReport } = await import('./services/reportExporter');
-        const artifact = await exportAnalysisReport(
-          {
-            task,
-            markdown: displayedMarkdown,
-            result,
-            structuredAudit: result?.structuredAudit ?? null,
-            isHistoricalView,
-            rehydratedLocally: rehydrate && combinedVault.length > 0 && !isHistoricalView,
-            payloadText: runMetrics?.sentPayloadText ?? redaction.redactedText,
-            vaultCount: runMetrics?.sentVaultCount ?? combinedVault.length,
-            bytesShielded: runMetrics?.sentBytesShielded ?? redaction.bytesShielded,
-            leakCount: runMetrics?.sentLeakCount ?? leakCheck,
-            sourceCounts: runMetrics?.sourceCounts ?? redaction.sourceCounts,
-          },
-          format
-        );
-        const url = URL.createObjectURL(artifact.blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = artifact.fileName;
-        a.click();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : String(err));
-      } finally {
-        setExportingReport(false);
-      }
-    },
-    [
-      displayedMarkdown,
-      result,
-      exportingReport,
-      task,
-      isHistoricalView,
-      rehydrate,
-      combinedVault.length,
-      runMetrics,
-      redaction.redactedText,
-      redaction.bytesShielded,
-      redaction.sourceCounts,
-      leakCheck,
-    ]
-  );
-
   const handleRetryPrimaryModel = useCallback(() => {
     clearCloudModelCooldown();
     setCloudModelPref('gemini-3.6-flash');
@@ -1069,9 +1019,10 @@ export default function App() {
 
   const handleExportSafeDocument = useCallback(
     async (format: SafeDocumentExportFormat) => {
-      if ((!rawText.trim() && !originalFile) || exportingSafeFile) return;
+      if (isHistoricalView || (!rawText.trim() && !originalFile) || exportingSafeFile) return;
       setExportingSafeFile(true);
       setErrorMsg(null);
+      setExportNotice(null);
       try {
         const { exportSanitizedDocumentAs } = await import('./services/fileRedactor');
         const redacted = await exportSanitizedDocumentAs(rawText, originalFile, format, {
@@ -1087,6 +1038,10 @@ export default function App() {
         a.download = redacted.fileName;
         a.click();
         URL.revokeObjectURL(url);
+        const protectedTotal = redacted.contextAnalysis.activeVault.length + manualPdfBoxes.length;
+        setExportNotice(
+          `Exported ${redacted.fileName} · ${protectedTotal} item${protectedTotal === 1 ? '' : 's'} protected · 0 leaks`
+        );
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : String(err));
       } finally {
@@ -1094,6 +1049,7 @@ export default function App() {
       }
     },
     [
+      isHistoricalView,
       rawText,
       originalFile,
       exportingSafeFile,
@@ -1266,8 +1222,6 @@ export default function App() {
             fileMeta={fileMeta}
             onClearFileMeta={handleClearFileMeta}
             originalFile={originalFile}
-            exportingSafeFile={exportingSafeFile}
-            onExportSafeDocument={handleExportSafeDocument}
             inputTab={inputTab}
             onInputTabChange={setInputTab}
             redaction={redaction}
@@ -1329,8 +1283,10 @@ export default function App() {
               onSaveToFirestore={handleSaveToFirestore}
               copied={copied}
               onCopyReport={handleCopyReport}
-              exportingReport={exportingReport}
-              onExportReport={handleExportReport}
+              originalFile={originalFile}
+              exportingSafeFile={exportingSafeFile}
+              exportNotice={exportNotice}
+              onExportSafeDocument={handleExportSafeDocument}
               onRetryPrimaryModel={handleRetryPrimaryModel}
               onQuickStart={handleRunPipeline}
               onSwitchToFastCloud={handleSwitchToFastCloud}

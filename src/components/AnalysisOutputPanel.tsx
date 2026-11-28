@@ -27,15 +27,7 @@ import {
 import { rehydrateLocally, SourceCounts, VaultEntry } from '../services/piiVault';
 import { HighlightedRedactedText, RichOutput } from './RichOutput';
 import { ExportMenuButton, ExportMenuOption } from './ExportMenuButton';
-import type { ReportExportFormat } from '../services/reportExporter';
-
-const REPORT_EXPORT_OPTIONS: ExportMenuOption[] = [
-  { id: 'pdf', label: 'Export as .pdf', hint: 'Clean paginated PDF report (metadata stripped)', highlight: true },
-  { id: 'docx', label: 'Export as .docx', hint: 'Editable Microsoft Word document' },
-  { id: 'md', label: 'Export as .md', hint: 'Markdown with SHA-256 verification proof' },
-  { id: 'json', label: 'Export as .json', hint: 'Structured audit & privacy telemetry' },
-  { id: 'txt', label: 'Export as .txt', hint: 'Plain text without Markdown symbols' },
-];
+import type { SafeDocumentExportFormat } from '../services/fileRedactor';
 
 export interface RunMetrics {
   sourceCounts: SourceCounts;
@@ -66,8 +58,10 @@ interface AnalysisOutputPanelProps {
   onSaveToFirestore: () => void;
   copied: boolean;
   onCopyReport: () => void;
-  exportingReport?: boolean;
-  onExportReport: (format: ReportExportFormat) => void;
+  originalFile?: File | null;
+  exportingSafeFile?: boolean;
+  exportNotice?: string | null;
+  onExportSafeDocument: (format: SafeDocumentExportFormat) => void;
   onRetryPrimaryModel?: () => void;
   onQuickStart: () => void;
   onSwitchToFastCloud: () => void;
@@ -291,8 +285,10 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
     onSaveToFirestore,
     copied,
     onCopyReport,
-    exportingReport = false,
-    onExportReport,
+    originalFile = null,
+    exportingSafeFile = false,
+    exportNotice = null,
+    onExportSafeDocument,
     onRetryPrimaryModel,
     onQuickStart,
     onSwitchToFastCloud,
@@ -306,6 +302,51 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
     const hasVaultItems = vault.length > 0;
     const effectiveRehydrate = rehydrate && hasVaultItems && !isHistoricalView && !isNanoUnavailable;
     const effectiveVaultLookup = isHistoricalView || isNanoUnavailable ? undefined : vaultLookup;
+
+    const originalFileName = originalFile?.name ?? null;
+    const originalFileExt = originalFileName?.split('.').pop()?.toLowerCase() || '';
+
+    const safeDocumentExportOptions = useMemo<ExportMenuOption[]>(() => {
+      const ext = originalFileExt;
+      const opts: ExportMenuOption[] = [];
+      if (originalFileName && ext) {
+        opts.push({
+          id: 'original',
+          label: `Keep original (.${ext})`,
+          hint:
+            ext === 'pdf'
+              ? 'Original PDF layout · black redaction bars · 0 hidden text'
+              : ext === 'docx'
+                ? 'Original Word layout · shaded safe tokens · metadata scrubbed'
+                : ext === 'csv'
+                  ? 'Original CSV table · RFC-4180 cell-safe redaction'
+                  : `Exact format-preserved safe-${originalFileName}`,
+          highlight: true,
+        });
+      }
+      opts.push(
+        {
+          id: 'pdf',
+          label: 'Export safe .pdf',
+          hint:
+            ext === 'docx'
+              ? 'Keeps Word tables & Unicode · blacked-out secrets · 0 hidden text'
+              : ext === 'csv'
+                ? 'Paginated redacted table PDF · 0 hidden text'
+                : 'Verified sanitized document as clean PDF (0 hidden text)',
+          highlight: !originalFileName,
+        },
+        {
+          id: 'docx',
+          label: 'Export safe .docx',
+          hint: 'Verified sanitized document as Word (.docx) with shaded tokens',
+        },
+        { id: 'md', label: 'Export safe .md', hint: 'Verified sanitized Markdown content' },
+        { id: 'txt', label: 'Export safe .txt', hint: 'Verified sanitized plain text' },
+        { id: 'json', label: 'Export safe .json', hint: 'Syntax-safe sanitized JSON' }
+      );
+      return opts;
+    }, [originalFileName, originalFileExt]);
 
     const riskBanner = useMemo(
       () =>
@@ -599,13 +640,23 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
         {/* Quiet Ghost Action Bar + Notion AI Follow-up Input */}
         {result && !isNanoUnavailable && (
           <div className="mt-4 shrink-0 space-y-3 border-t border-[var(--n-border)] pt-3">
-            {savedNotice && (
+            {(savedNotice || exportNotice) && (
               <div
                 aria-live="polite"
-                className="flex items-center gap-1.5 text-[12.5px] text-[var(--n-accent)]"
+                className="flex flex-wrap items-center gap-3 text-[12.5px] text-[var(--n-accent)]"
               >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                {savedNotice}
+                {exportNotice && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {exportNotice}
+                  </span>
+                )}
+                {savedNotice && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {savedNotice}
+                  </span>
+                )}
               </div>
             )}
 
@@ -658,12 +709,17 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
               </button>
 
               <ExportMenuButton
-                label="Export"
-                options={REPORT_EXPORT_OPTIONS}
-                busy={exportingReport}
+                label="Export safe file"
+                options={safeDocumentExportOptions}
+                busy={exportingSafeFile}
+                disabled={isHistoricalView || running}
                 align="left"
-                title="Choose report export format (.pdf, .docx, .md, .json, .txt)"
-                onSelect={(fmt) => onExportReport(fmt as ReportExportFormat)}
+                title={
+                  isHistoricalView
+                    ? 'Original document is never stored in cloud (RAM-only) — open or upload a document to export'
+                    : 'Export your verified sanitized input file keeping its format (only sensitive info redacted)'
+                }
+                onSelect={(fmt) => onExportSafeDocument(fmt as SafeDocumentExportFormat)}
               />
             </div>
 

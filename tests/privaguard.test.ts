@@ -1106,3 +1106,30 @@ test('v7.1 cross-format exportSanitizedDocumentAs (DOCX -> PDF, CSV -> PDF) & PD
   });
   assert.equal(withManual.boxesDrawn, 1);
 });
+
+test('v7.2 pure user document export: zero PrivaGuard commentary, zero synthetic safe- title, zero raw PII', async () => {
+  const jszipMod = await import('jszip');
+  const JSZip = jszipMod.default ?? jszipMod;
+
+  const rawInput = 'Hợp đồng hợp tác\nLiên hệ: ceo@acmecorp.io\nAPI Key: AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ';
+
+  // Cross-format TXT -> DOCX must contain ONLY sanitized user text (no fake "# safe-..." title, no PrivaGuard commentary)
+  const docxRes = await exportSanitizedDocumentAs(rawInput, null, 'docx', { smartContextGuard: true });
+  const zip = await JSZip.loadAsync(await docxRes.blob.arrayBuffer());
+  const docXml = await zip.file('word/document.xml')!.async('string');
+  assert.ok(docXml.includes('Hợp đồng hợp tác'));
+  assert.ok(docXml.includes('[EMAIL_1]'));
+  assert.ok(docXml.includes('[SECRET_1]'));
+  assert.ok(!docXml.includes('ceo@acmecorp.io'));
+  assert.ok(!docXml.includes('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+  assert.ok(!docXml.includes('safe-privaguard-safe-'));
+  assert.ok(!docXml.includes('PrivaGuard AI Report'));
+
+  // Cross-format TXT -> PDF must contain zero raw PII and zero synthetic PrivaGuard banner text
+  const pdfRes = await exportSanitizedDocumentAs(rawInput, null, 'pdf', { smartContextGuard: true });
+  const pdfAscii = Buffer.from(await pdfRes.blob.arrayBuffer()).toString('latin1');
+  assert.ok(pdfAscii.startsWith('%PDF-'));
+  assert.ok(!pdfAscii.includes('ceo@acmecorp.io'));
+  assert.ok(!pdfAscii.includes('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+  assert.ok(!pdfAscii.includes('PrivaGuard AI Report'));
+});

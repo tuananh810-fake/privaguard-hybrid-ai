@@ -19,9 +19,8 @@ import {
 import { SAMPLE_DOCUMENTS } from '../data/samples';
 import { AnalysisTask, AttachedImage, ModeKey, NanoAvailability } from '../services/hybridAI';
 import { RedactionResult, VaultEntry } from '../services/piiVault';
-import type { ManualPdfBox, SafeDocumentExportFormat } from '../services/fileRedactor';
+import type { ManualPdfBox } from '../services/fileRedactor';
 import { HighlightedRedactedText } from './RichOutput';
-import { ExportMenuButton, ExportMenuOption } from './ExportMenuButton';
 
 const DocumentPreviewPane = lazy(() =>
   import('./DocumentPreviewPane').then((m) => ({ default: m.DocumentPreviewPane }))
@@ -53,8 +52,6 @@ interface DocumentInputPanelProps {
   fileMeta: string | null;
   onClearFileMeta: () => void;
   originalFile?: File | null;
-  exportingSafeFile?: boolean;
-  onExportSafeDocument?: (format: SafeDocumentExportFormat) => void;
   inputTab: InputTabKey;
   onInputTabChange: (tab: InputTabKey) => void;
   redaction: RedactionResult;
@@ -150,8 +147,6 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     fileMeta,
     onClearFileMeta,
     originalFile = null,
-    exportingSafeFile = false,
-    onExportSafeDocument,
     inputTab,
     onInputTabChange,
     redaction,
@@ -220,64 +215,8 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
       }
     }
 
-    function handleDownloadSafeTxt() {
-      if (!redaction.redactedText) return;
-      const blob = new Blob([redaction.redactedText], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `privaguard-safe-${Date.now()}.txt`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-
     const originalFileName = originalFile?.name ?? null;
     const originalFileExt = originalFileName?.split('.').pop()?.toLowerCase() || '';
-
-    const safeDocExportOptions = useMemo<ExportMenuOption[]>(() => {
-      const ext = originalFileExt;
-      const opts: ExportMenuOption[] = [];
-      if (originalFileName && ext) {
-        opts.push({
-          id: 'original',
-          label: `Keep original (.${ext})`,
-          hint:
-            ext === 'pdf'
-              ? 'Visual redacted PDF · 0 hidden text · incl. manual boxes'
-              : ext === 'docx'
-                ? 'Word layout preserved · shaded tokens · metadata scrubbed'
-                : ext === 'csv'
-                  ? 'RFC-4180 cell-safe CSV · structure preserved'
-                  : `Format-preserved safe-${originalFileName}`,
-          highlight: true,
-        });
-      }
-      opts.push(
-        {
-          id: 'pdf',
-          label: 'Export as .pdf',
-          hint:
-            ext === 'docx'
-              ? 'Keeps Word layout & Unicode · black redaction bars · 0 hidden text'
-              : ext === 'csv'
-                ? 'Paginated redacted table PDF · 0 hidden text'
-                : 'Rich Unicode redacted PDF (0 hidden text · metadata stripped)',
-        },
-        { id: 'docx', label: 'Export as .docx', hint: 'Editable Word document (shaded safe tokens)' },
-        { id: 'md', label: 'Export as .md', hint: 'Sanitized Markdown text' },
-        { id: 'txt', label: 'Export as .txt', hint: 'Plain sanitized text for any AI' },
-        { id: 'json', label: 'Export as .json', hint: 'Syntax-safe sanitized JSON' }
-      );
-      return opts;
-    }, [originalFileName, originalFileExt]);
-
-    function handleSelectSafeDocExport(formatId: string) {
-      if (onExportSafeDocument) {
-        onExportSafeDocument(formatId as SafeDocumentExportFormat);
-      } else {
-        handleDownloadSafeTxt();
-      }
-    }
 
     function handleDownloadRedactedImage() {
       if (!attachedImage?.previewUrl) return;
@@ -595,25 +534,14 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--n-accent)]" />
               <span className="truncate">{fileMeta}</span>
             </span>
-            <div className="flex shrink-0 items-center gap-1.5">
-              <ExportMenuButton
-                label="Export safe"
-                options={safeDocExportOptions}
-                busy={exportingSafeFile}
-                size="xs"
-                align="right"
-                title="Choose output format for your sanitized file"
-                onSelect={handleSelectSafeDocExport}
-              />
-              <button
-                type="button"
-                onClick={onClearFileMeta}
-                aria-label="Dismiss file info"
-                className="shrink-0 rounded p-0.5 hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={onClearFileMeta}
+              aria-label="Dismiss file info"
+              className="shrink-0 rounded p-0.5 hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+            >
+              <X className="h-3 w-3" />
+            </button>
           </div>
         )}
 
@@ -781,34 +709,22 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
             <div className="min-h-0 flex-1 overflow-y-auto py-2 pb-4 text-[14.5px] leading-[1.65] text-[var(--n-text)]">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[12.5px] text-[var(--n-muted)]">
-                  Safe version ready for any AI. Click any highlighted tag to peek locally.
+                  Safe preview before sending. Click any highlighted tag to peek locally — run Analyze safely to verify and export.
                 </p>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <ExportMenuButton
-                    label="Export safe"
-                    options={safeDocExportOptions}
-                    busy={exportingSafeFile}
-                    disabled={!redaction.redactedText}
-                    size="xs"
-                    align="right"
-                    title="Export sanitized document as original format, .pdf, .docx, .md, .txt, or .json"
-                    onSelect={handleSelectSafeDocExport}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCopySafeText}
-                    disabled={!redaction.redactedText}
-                    title="Copy masked safe text to paste into ChatGPT, Gemini, or Claude"
-                    className="inline-flex items-center gap-1 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-1 text-[11.5px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] disabled:opacity-40"
-                  >
-                    {safeCopied ? (
-                      <CheckCircle2 className="h-3 w-3 text-[var(--n-accent)]" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                    {safeCopied ? 'Copied' : 'Copy safe text'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleCopySafeText}
+                  disabled={!redaction.redactedText}
+                  title="Copy masked safe text to paste into ChatGPT, Gemini, or Claude"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-1 text-[11.5px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] disabled:opacity-40"
+                >
+                  {safeCopied ? (
+                    <CheckCircle2 className="h-3 w-3 text-[var(--n-accent)]" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                  {safeCopied ? 'Copied' : 'Copy safe text'}
+                </button>
               </div>
               <HighlightedRedactedText text={redaction.redactedText} vaultLookup={vaultLookup} />
             </div>

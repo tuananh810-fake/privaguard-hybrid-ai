@@ -524,14 +524,20 @@ async function canvasToJpegBytes(canvas: HTMLCanvasElement, quality = 0.91): Pro
 export async function renderRedactedHtmlToPdfBytes(
   title: string,
   html: string,
-  opts: { subtitle?: string; redactionCount?: number; maxPages?: number } = {}
+  opts: {
+    subtitle?: string;
+    redactionCount?: number;
+    maxPages?: number;
+    includeHeaderFooter?: boolean;
+  } = {}
 ): Promise<Uint8Array> {
   const sanitized = safeSanitizeDocumentHtml(html);
+  const includeHeaderFooter = opts.includeHeaderFooter ?? false;
 
   // Headless Node fallback for automated tests
   if (typeof document === 'undefined' || typeof DOMParser === 'undefined') {
     const plain = sanitized.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
-    return buildCleanPdfBytes(title, plain);
+    return buildCleanPdfBytes(title, plain, includeHeaderFooter);
   }
 
   const blocks = extractLayoutBlocksFromHtml(sanitized);
@@ -565,32 +571,34 @@ export async function renderRedactedHtmlToPdfBytes(
     return nextPage();
   };
 
-  // Clean Top Banner on Page 1
-  current.ctx.fillStyle = '#0f766e';
-  current.ctx.fillRect(MARGIN_X, y, 4, 24);
-  current.ctx.font = makeFont(14, { bold: true });
-  current.ctx.fillStyle = '#111827';
-  current.ctx.textBaseline = 'top';
-  current.ctx.fillText(title.slice(0, 72), MARGIN_X + 12, y + 1, CONTENT_W - 16);
+  // Optional Report Top Banner (omitted for pure user document exports)
+  if (includeHeaderFooter) {
+    current.ctx.fillStyle = '#0f766e';
+    current.ctx.fillRect(MARGIN_X, y, 4, 24);
+    current.ctx.font = makeFont(14, { bold: true });
+    current.ctx.fillStyle = '#111827';
+    current.ctx.textBaseline = 'top';
+    current.ctx.fillText(title.slice(0, 72), MARGIN_X + 12, y + 1, CONTENT_W - 16);
 
-  const subParts = [
-    opts.subtitle || 'Redacted Document',
-    typeof opts.redactionCount === 'number'
-      ? `${opts.redactionCount} redaction${opts.redactionCount === 1 ? '' : 's'} applied`
-      : null,
-    '0 hidden text · metadata stripped',
-  ].filter(Boolean);
-  current.ctx.font = makeFont(8.5);
-  current.ctx.fillStyle = '#6b7280';
-  current.ctx.fillText(subParts.join(' · '), MARGIN_X + 12, y + 18, CONTENT_W - 16);
-  y += 36;
-  current.ctx.strokeStyle = '#e5e7eb';
-  current.ctx.lineWidth = 0.8;
-  current.ctx.beginPath();
-  current.ctx.moveTo(MARGIN_X, y);
-  current.ctx.lineTo(MARGIN_X + CONTENT_W, y);
-  current.ctx.stroke();
-  y += 14;
+    const subParts = [
+      opts.subtitle || 'Redacted Document',
+      typeof opts.redactionCount === 'number'
+        ? `${opts.redactionCount} redaction${opts.redactionCount === 1 ? '' : 's'} applied`
+        : null,
+      '0 hidden text · metadata stripped',
+    ].filter(Boolean);
+    current.ctx.font = makeFont(8.5);
+    current.ctx.fillStyle = '#6b7280';
+    current.ctx.fillText(subParts.join(' · '), MARGIN_X + 12, y + 18, CONTENT_W - 16);
+    y += 36;
+    current.ctx.strokeStyle = '#e5e7eb';
+    current.ctx.lineWidth = 0.8;
+    current.ctx.beginPath();
+    current.ctx.moveTo(MARGIN_X, y);
+    current.ctx.lineTo(MARGIN_X + CONTENT_W, y);
+    current.ctx.stroke();
+    y += 14;
+  }
 
   for (const block of blocks) {
     if (pages.length > maxPages) break;
@@ -762,27 +770,29 @@ export async function renderRedactedHtmlToPdfBytes(
     }
   }
 
-  // Draw crisp footer on every page
-  const totalPages = pages.length;
-  pages.forEach((canvas, idx) => {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const footerY = A4_PT_H - 28;
-    ctx.strokeStyle = '#e5e7eb';
-    ctx.lineWidth = 0.6;
-    ctx.beginPath();
-    ctx.moveTo(MARGIN_X, footerY - 6);
-    ctx.lineTo(MARGIN_X + CONTENT_W, footerY - 6);
-    ctx.stroke();
+  // Optional page footer (omitted for pure user document exports so original layout stays clean)
+  if (includeHeaderFooter) {
+    const totalPages = pages.length;
+    pages.forEach((canvas, idx) => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const footerY = A4_PT_H - 28;
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(MARGIN_X, footerY - 6);
+      ctx.lineTo(MARGIN_X + CONTENT_W, footerY - 6);
+      ctx.stroke();
 
-    ctx.font = makeFont(8);
-    ctx.fillStyle = '#6b7280';
-    ctx.textBaseline = 'top';
-    ctx.fillText('Redacted locally in browser RAM · PrivaGuard AI', MARGIN_X, footerY);
-    const pageLabel = `Page ${idx + 1} / ${totalPages}`;
-    const labelW = ctx.measureText(pageLabel).width;
-    ctx.fillText(pageLabel, MARGIN_X + CONTENT_W - labelW, footerY);
-  });
+      ctx.font = makeFont(8);
+      ctx.fillStyle = '#6b7280';
+      ctx.textBaseline = 'top';
+      ctx.fillText('Redacted locally in browser RAM · PrivaGuard AI', MARGIN_X, footerY);
+      const pageLabel = `Page ${idx + 1} / ${totalPages}`;
+      const labelW = ctx.measureText(pageLabel).width;
+      ctx.fillText(pageLabel, MARGIN_X + CONTENT_W - labelW, footerY);
+    });
+  }
 
   // Pack pages into a metadata-stripped, zero-hidden-text PDF via pdf-lib
   const { PDFDocument } = await import('pdf-lib');
@@ -791,8 +801,8 @@ export async function renderRedactedHtmlToPdfBytes(
   outPdf.setAuthor('');
   outPdf.setSubject('');
   outPdf.setKeywords([]);
-  outPdf.setCreator('PrivaGuard AI');
-  outPdf.setProducer('PrivaGuard AI Local Redactor');
+  outPdf.setCreator('');
+  outPdf.setProducer('');
 
   for (const canvas of pages) {
     const jpgBytes = await canvasToJpegBytes(canvas, 0.91);
@@ -807,7 +817,8 @@ export async function renderRedactedHtmlToPdfBytes(
 export async function renderRedactedDocxToPdfBytes(
   redactedDocxBytes: Uint8Array,
   title: string,
-  redactionCount: number
+  redactionCount: number,
+  includeHeaderFooter = false
 ): Promise<Uint8Array> {
   const mammothMod = await import('mammoth');
   const mammoth = mammothMod.default ?? mammothMod;
@@ -821,6 +832,7 @@ export async function renderRedactedDocxToPdfBytes(
   return renderRedactedHtmlToPdfBytes(title, html, {
     subtitle: 'Converted from Word (.docx) · layout preserved',
     redactionCount,
+    includeHeaderFooter,
   });
 }
 
@@ -828,13 +840,15 @@ export async function renderStructuredTextToPdfBytes(
   kind: 'md' | 'csv' | 'json' | 'txt',
   redactedText: string,
   title: string,
-  redactionCount: number
+  redactionCount: number,
+  includeHeaderFooter = false
 ): Promise<Uint8Array> {
   if (kind === 'csv') {
     const { rows } = parseCsvRows(redactedText);
     return renderRedactedHtmlToPdfBytes(title, csvRowsToSafeHtml(rows), {
       subtitle: 'Converted from CSV table · cell-level redaction',
       redactionCount,
+      includeHeaderFooter,
     });
   }
   if (kind === 'json') {
@@ -842,12 +856,14 @@ export async function renderStructuredTextToPdfBytes(
     return renderRedactedHtmlToPdfBytes(title, html, {
       subtitle: 'Converted from JSON · syntax preserved',
       redactionCount,
+      includeHeaderFooter,
     });
   }
   if (kind === 'md') {
     return renderRedactedHtmlToPdfBytes(title, markdownToSafeHtml(redactedText), {
       subtitle: 'Converted from Markdown',
       redactionCount,
+      includeHeaderFooter,
     });
   }
   // Plain text / logs / env
@@ -855,5 +871,6 @@ export async function renderStructuredTextToPdfBytes(
   return renderRedactedHtmlToPdfBytes(title, html, {
     subtitle: 'Sanitized Document',
     redactionCount,
+    includeHeaderFooter,
   });
 }
