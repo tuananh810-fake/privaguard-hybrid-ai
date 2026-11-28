@@ -5,11 +5,12 @@
 ![PrivaGuard AI Demo Walkthrough](docs/privaguard-demo.gif)
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Firebase%20Hosting-0F7B6C?style=flat-square)](https://buildhybridai-tuananh.web.app)
+[![Demo Video](https://img.shields.io/badge/Demo%20Video-YouTube%20(2%3A21)-FF0000?style=flat-square&logo=youtube&logoColor=white)](https://youtu.be/RKsPo-4NGts)
 [![Built for](https://img.shields.io/badge/Hackathon-%23BuildHybridAI%202026-37352F?style=flat-square)](https://buildhybridai.devpost.com/)
 [![Firebase AI Logic](https://img.shields.io/badge/Firebase%20AI%20Logic-Hybrid%20Nano%20%2B%20Gemini%203.6%20Flash-DD2C00?style=flat-square)](https://firebase.google.com/docs/ai-logic)
 [![Tests](https://img.shields.io/badge/Unit%20Tests-23%2F23%20PASS-0F7B6C?style=flat-square)](#benchmarks--verification)
 
-**Live App:** https://buildhybridai-tuananh.web.app · **User Guide:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) · **Devpost Pack:** [DEVPOST_SUBMISSION.md](DEVPOST_SUBMISSION.md)
+**Live App:** https://buildhybridai-tuananh.web.app · **Demo Video (2:21):** https://youtu.be/RKsPo-4NGts · **User Guide:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) · **Devpost Pack:** [DEVPOST_SUBMISSION.md](DEVPOST_SUBMISSION.md)
 
 <details>
 <summary><strong>📸 Production Screenshots (1080p)</strong></summary>

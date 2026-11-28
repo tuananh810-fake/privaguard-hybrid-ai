@@ -3,6 +3,7 @@
 > **Use cloud AI on confidential docs — secrets never leave your browser.**
 
 **Live Demo:** https://buildhybridai-tuananh.web.app
+**Demo Video (2:21, 1080p):** https://youtu.be/RKsPo-4NGts
 **Source Code:** https://github.com/tuananh810-fake/privaguard-hybrid-ai
 
 ---
@@ -61,7 +62,7 @@ PrivaGuard AI is a calm, Notion-style Hybrid AI workspace where **0 detected PII
 
 ---
 
-## Demo Video v2 Storyboard (`2:21`, 1080p 30fps — `submission-pack/privaguard-demo-v2.mp4`)
+## Demo Video v2 Storyboard (`2:21`, 1080p 30fps — https://youtu.be/RKsPo-4NGts)
 
 | Timestamp | Chapter | What Judges See |
 |---|---|---|
@@ -89,4 +90,4 @@ PrivaGuard AI is a calm, Notion-style Hybrid AI workspace where **0 detected PII
   4. `03-cloud-snapshot-audit.png`
   5. `04-auto-ocr-id-redaction.png`
   6. `05-strict-offline-guard.png`
-- **Demo Video:** Upload `submission-pack/privaguard-demo-v2.mp4` (`2:21`, 1080p 30fps, burned-in English captions) — or `privaguard-demo-v2-clean.mp4` + `privaguard-demo-v2.srt` — to YouTube (Public/Unlisted) and paste the URL into Devpost.
+- **Demo Video (YouTube Public):** `https://youtu.be/RKsPo-4NGts` (`2:21`, 1080p 30fps, burned-in English captions)
