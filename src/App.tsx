@@ -24,11 +24,14 @@ import {
   VaultEntry,
   verifyZeroLeak,
 } from './services/piiVault';
+import { analyzeWithContextGuard, contextAnalysisToRedaction } from './services/sensitivityEngine';
 import {
   AnalysisTask,
   AttachedImage,
   buildTaskPrompt,
   checkChromeNanoAvailability,
+  clearCloudModelCooldown,
+  CloudModelPreference,
   FollowUpMessage,
   generateFollowUpStream,
   generateHybridStream,
@@ -36,6 +39,8 @@ import {
   ModeKey,
   NanoAvailability,
 } from './services/hybridAI';
+import type { SafeDocumentExportFormat } from './services/fileRedactor';
+import type { ReportExportFormat } from './services/reportExporter';
 import type { NanoDiscoveredEntity, NanoDiscoveryResult } from './services/nanoEntityDiscovery';
 import { classifyDroppedFile, parseDocumentLocally } from './services/documentParser';
 import type { SavedAnalysis } from './services/historyStore';
@@ -81,13 +86,18 @@ export default function App() {
 
   const [customTerms, setCustomTerms] = useState('Nguyen Tuan Anh, Sarah Jenkins, David Chen');
   const [categories, setCategories] = useState<CategoryFilter>(DEFAULT_CATEGORY_FILTER);
+  const [smartContextGuard, setSmartContextGuard] = useState(true);
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
   const [imageMaskCount, setImageMaskCount] = useState(0);
   const [showImageRedactor, setShowImageRedactor] = useState(false);
   const [extractingFile, setExtractingFile] = useState(false);
   const [fileMeta, setFileMeta] = useState<string | null>(null);
+  const [originalFile, setOriginalFile] = useState<File | null>(null);
+  const [exportingSafeFile, setExportingSafeFile] = useState(false);
+  const [exportingReport, setExportingReport] = useState(false);
 
   const [mode, setMode] = useState<ModeKey>('PREFER_ON_DEVICE');
+  const [cloudModelPref, setCloudModelPref] = useState<CloudModelPreference>('auto');
   const [task, setTask] = useState<AnalysisTask>('risk_audit');
   const [inputTab, setInputTab] = useState<InputTabKey>('original');
   const [showTechDrawer, setShowTechDrawer] = useState(false);
@@ -301,10 +311,33 @@ export default function App() {
 
   const extraTerms = useMemo(() => taggedTerms.map((t) => t.text), [taggedTerms]);
 
-  const redaction = useMemo(
-    () => redactLocally(deferredRawText, taggedTerms, categories),
-    [deferredRawText, taggedTerms, categories]
+  const contextAnalysis = useMemo(
+    () =>
+      analyzeWithContextGuard(deferredRawText, {
+        extraSensitiveTerms: taggedTerms,
+        enabledCategories: categories,
+        smartContextGuard,
+      }),
+    [deferredRawText, taggedTerms, categories, smartContextGuard]
   );
+
+  const redaction = useMemo(() => contextAnalysisToRedaction(contextAnalysis), [contextAnalysis]);
+
+  const effectiveCloudModel = useMemo(
+    () => (cloudModelPref === 'auto' ? remoteSettings.cloudModel : cloudModelPref),
+    [cloudModelPref, remoteSettings.cloudModel]
+  );
+
+  const handleCloudModelPrefChange = useCallback((pref: CloudModelPreference) => {
+    setCloudModelPref(pref);
+    if (pref === 'gemini-3.6-flash' || pref === 'auto') {
+      clearCloudModelCooldown();
+    }
+  }, []);
+
+  const handleToggleSmartContextGuard = useCallback(() => {
+    setSmartContextGuard((prev) => !prev);
+  }, []);
 
   const combinedVault = useMemo(() => {
     if (extraFollowUpVault.length === 0) return redaction.vault;
@@ -390,6 +423,8 @@ export default function App() {
       setIsHistoricalView(false);
       setRawText(content);
       setFileMeta(null);
+      setOriginalFile(null);
+      setInputTab((tab) => (tab === 'pages' ? 'original' : tab));
       setAiDiscoveredEntities([]);
       setRunMetrics(null);
       setResult(null);
@@ -494,6 +529,7 @@ export default function App() {
         const parsed = await parseDocumentLocally(file);
         setRawText(parsed.text);
         setFileMeta(parsed.meta);
+        setOriginalFile(file);
         setAiDiscoveredEntities([]);
         setRunMetrics(null);
         setResult(null);
@@ -625,7 +661,12 @@ export default function App() {
         source: 'nano',
         category: e.type,
       }));
-      const finalRedaction = redactLocally(rawText, [...nanoTerms, ...manualTerms], categories);
+      const finalContext = analyzeWithContextGuard(rawText, {
+        extraSensitiveTerms: [...nanoTerms, ...manualTerms],
+        enabledCategories: categories,
+        smartContextGuard,
+      });
+      const finalRedaction = contextAnalysisToRedaction(finalContext);
 
       const prompt = buildTaskPrompt(finalRedaction.redactedText, task, Boolean(attachedImage));
       const useStructuredAudit = task === 'risk_audit' && effectiveMode !== 'ONLY_ON_DEVICE';
@@ -633,7 +674,7 @@ export default function App() {
       const aiRes = await generateHybridStream(
         prompt,
         effectiveMode,
-        remoteSettings.cloudModel,
+        effectiveCloudModel,
         attachedImage,
         (partial) => {
           if (!controller.signal.aborted) scheduleStreamUpdate(setStreamingText, partial);
@@ -692,9 +733,10 @@ export default function App() {
     nanoStatus,
     customTerms,
     categories,
+    smartContextGuard,
     task,
     attachedImage,
-    remoteSettings.cloudModel,
+    effectiveCloudModel,
     remoteSettings.systemPromptStyle,
     cancelPendingStreamFrame,
     scheduleStreamUpdate,
@@ -775,7 +817,7 @@ export default function App() {
           followUps,
           redactedQ,
           effectiveMode,
-          remoteSettings.cloudModel,
+          effectiveCloudModel,
           remoteSettings.systemPromptStyle,
           (partial) => {
             if (!controller.signal.aborted) scheduleStreamUpdate(setFollowUpStreaming, partial);
@@ -829,7 +871,7 @@ export default function App() {
       mode,
       runMetrics?.sentPayloadText,
       redaction.redactedText,
-      remoteSettings.cloudModel,
+      effectiveCloudModel,
       remoteSettings.systemPromptStyle,
       cancelPendingStreamFrame,
       scheduleStreamUpdate,
@@ -843,70 +885,62 @@ export default function App() {
     setTimeout(() => setCopied(false), 1800);
   }, [displayedMarkdown, result?.nanoUnavailable, result?.wasMockEcho]);
 
-  const handleExportMarkdown = useCallback(async () => {
-    if (!displayedMarkdown || result?.nanoUnavailable || result?.wasMockEcho) return;
-    const snapshotPayloadText = runMetrics?.sentPayloadText ?? redaction.redactedText;
-    const snapshotVaultCount = runMetrics?.sentVaultCount ?? combinedVault.length;
-    const snapshotBytesShielded = runMetrics?.sentBytesShielded ?? redaction.bytesShielded;
-    const snapshotLeakCount = runMetrics?.sentLeakCount ?? leakCheck;
-    const snapshotSourceCounts = runMetrics?.sourceCounts ?? redaction.sourceCounts;
-
-    let payloadHash = 'unavailable';
-    if (!isHistoricalView) {
+  const handleExportReport = useCallback(
+    async (format: ReportExportFormat) => {
+      if (!displayedMarkdown || result?.nanoUnavailable || result?.wasMockEcho || exportingReport) return;
+      setExportingReport(true);
+      setErrorMsg(null);
       try {
-        if (typeof crypto !== 'undefined' && crypto.subtle) {
-          const bytes = new TextEncoder().encode(snapshotPayloadText);
-          const digest = await crypto.subtle.digest('SHA-256', bytes);
-          payloadHash = Array.from(new Uint8Array(digest))
-            .map((b) => b.toString(16).padStart(2, '0'))
-            .join('');
-        }
-      } catch {
-        payloadHash = 'unavailable';
+        const { exportAnalysisReport } = await import('./services/reportExporter');
+        const artifact = await exportAnalysisReport(
+          {
+            task,
+            markdown: displayedMarkdown,
+            result,
+            structuredAudit: result?.structuredAudit ?? null,
+            isHistoricalView,
+            rehydratedLocally: rehydrate && combinedVault.length > 0 && !isHistoricalView,
+            payloadText: runMetrics?.sentPayloadText ?? redaction.redactedText,
+            vaultCount: runMetrics?.sentVaultCount ?? combinedVault.length,
+            bytesShielded: runMetrics?.sentBytesShielded ?? redaction.bytesShielded,
+            leakCount: runMetrics?.sentLeakCount ?? leakCheck,
+            sourceCounts: runMetrics?.sourceCounts ?? redaction.sourceCounts,
+          },
+          format
+        );
+        const url = URL.createObjectURL(artifact.blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = artifact.fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : String(err));
+      } finally {
+        setExportingReport(false);
       }
-    }
+    },
+    [
+      displayedMarkdown,
+      result,
+      exportingReport,
+      task,
+      isHistoricalView,
+      rehydrate,
+      combinedVault.length,
+      runMetrics,
+      redaction.redactedText,
+      redaction.bytesShielded,
+      redaction.sourceCounts,
+      leakCheck,
+    ]
+  );
 
-    const verificationFooter = isHistoricalView
-      ? [
-          '\n\n---',
-          '### PrivaGuard Anonymized Cloud Snapshot',
-          `- **Exported (UTC):** ${new Date().toISOString()}`,
-          `- **Inference Engine:** ${result?.inferenceSource === 'ON_DEVICE' ? 'Device (Gemini Nano)' : `Cloud (${result?.modelUsed || 'gemini-3.6-flash'})`}`,
-          '- **Vault Persistence:** Original secrets were never persisted (RAM-only vault)',
-        ].join('\n')
-      : [
-          '\n\n---',
-          '### PrivaGuard Local Detection & Masking Proof',
-          `- **Timestamp (UTC):** ${new Date().toISOString()}`,
-          `- **Inference Engine:** ${result?.inferenceSource === 'ON_DEVICE' ? 'Device (Gemini Nano)' : `Cloud (${result?.modelUsed || 'gemini-3.6-flash'})`}`,
-          `- **Detected PII Masked Locally:** ${snapshotVaultCount} (regex ${snapshotSourceCounts.regex} / Nano ${snapshotSourceCounts.nano} / manual ${snapshotSourceCounts.manual})`,
-          `- **Private Bytes Protected in RAM:** ${snapshotBytesShielded} bytes`,
-          `- **Detected PII Sent to Cloud:** ${snapshotLeakCount} (0 detected PII sent to cloud when 0)`,
-          `- **Detection Scope:** regex + on-device Nano + manual marks`,
-          `- **Sanitized Payload SHA-256:** \`${payloadHash}\``,
-        ].join('\n');
-
-    const blob = new Blob([displayedMarkdown + verificationFooter], {
-      type: 'text/markdown;charset=utf-8',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `privaguard-${task}-${Date.now()}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [
-    displayedMarkdown,
-    task,
-    isHistoricalView,
-    runMetrics,
-    redaction.redactedText,
-    redaction.bytesShielded,
-    redaction.sourceCounts,
-    result,
-    combinedVault.length,
-    leakCheck,
-  ]);
+  const handleRetryPrimaryModel = useCallback(() => {
+    clearCloudModelCooldown();
+    setCloudModelPref('gemini-3.6-flash');
+    void handleRunPipeline();
+  }, [handleRunPipeline]);
 
   const handleSaveToFirestore = useCallback(async () => {
     if (!result || isHistoricalView || result.nanoUnavailable || result.wasMockEcho) return;
@@ -991,7 +1025,38 @@ export default function App() {
     }
   }, []);
 
-  const handleClearFileMeta = useCallback(() => setFileMeta(null), []);
+  const handleClearFileMeta = useCallback(() => {
+    setFileMeta(null);
+    setOriginalFile(null);
+    setInputTab((tab) => (tab === 'pages' ? 'original' : tab));
+  }, []);
+
+  const handleExportSafeDocument = useCallback(
+    async (format: SafeDocumentExportFormat) => {
+      if ((!rawText.trim() && !originalFile) || exportingSafeFile) return;
+      setExportingSafeFile(true);
+      setErrorMsg(null);
+      try {
+        const { exportSanitizedDocumentAs } = await import('./services/fileRedactor');
+        const redacted = await exportSanitizedDocumentAs(rawText, originalFile, format, {
+          extraSensitiveTerms: taggedTerms,
+          enabledCategories: categories,
+          smartContextGuard,
+        });
+        const url = URL.createObjectURL(redacted.blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = redacted.fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : String(err));
+      } finally {
+        setExportingSafeFile(false);
+      }
+    },
+    [rawText, originalFile, exportingSafeFile, taggedTerms, categories, smartContextGuard]
+  );
   const handleOpenTechDrawer = useCallback(() => setShowTechDrawer(true), []);
   const handleOpenImageRedactor = useCallback(() => setShowImageRedactor(true), []);
   const handleRemoveImage = useCallback(() => {
@@ -1143,12 +1208,19 @@ export default function App() {
             extractingFile={extractingFile}
             fileMeta={fileMeta}
             onClearFileMeta={handleClearFileMeta}
+            originalFile={originalFile}
+            exportingSafeFile={exportingSafeFile}
+            onExportSafeDocument={handleExportSafeDocument}
             inputTab={inputTab}
             onInputTabChange={setInputTab}
             redaction={redaction}
             vaultLookup={vaultLookup}
             leakCheck={leakCheck}
             outgoingPrompt={outgoingPrompt}
+            smartContextGuard={smartContextGuard}
+            onToggleSmartContextGuard={handleToggleSmartContextGuard}
+            contextGuardSummary={contextAnalysis.summaryLabel}
+            keptSafeCount={contextAnalysis.keptSafeByContext.length}
             manualTerms={manualTermsList}
             onAddManualTerm={handleAddManualTerm}
             onRemoveManualTerm={handleRemoveManualTerm}
@@ -1194,7 +1266,9 @@ export default function App() {
               onSaveToFirestore={handleSaveToFirestore}
               copied={copied}
               onCopyReport={handleCopyReport}
-              onExportMarkdown={handleExportMarkdown}
+              exportingReport={exportingReport}
+              onExportReport={handleExportReport}
+              onRetryPrimaryModel={handleRetryPrimaryModel}
               onQuickStart={handleRunPipeline}
               onSwitchToFastCloud={handleSwitchToFastCloud}
               followUps={followUps}
@@ -1222,6 +1296,8 @@ export default function App() {
         <TechDrawer
           mode={mode}
           onModeChange={setMode}
+          cloudModelPref={cloudModelPref}
+          onCloudModelPrefChange={handleCloudModelPrefChange}
           simulatedOffline={simulatedOffline}
           onToggleSimulatedOffline={() => setSimulatedOffline((v) => !v)}
           nanoStatus={nanoStatus}

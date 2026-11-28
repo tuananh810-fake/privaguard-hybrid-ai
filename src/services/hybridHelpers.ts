@@ -1,7 +1,7 @@
 export type AnalysisTask = 'executive' | 'risk_audit' | 'action_plan' | 'quick_offline';
 
-export const CLOUD_TTFT_TIMEOUT_MS = 8_000;
-export const STALLED_MODEL_COOLDOWN_MS = 5 * 60_000;
+export const CLOUD_TTFT_TIMEOUT_MS = 12_000;
+export const STALLED_MODEL_COOLDOWN_MS = 90_000;
 
 export function markCloudModelStalled(
   stalledModels: Map<string, number>,
@@ -9,6 +9,36 @@ export function markCloudModelStalled(
   now = Date.now()
 ): void {
   stalledModels.set(model, now);
+}
+
+export function clearStalledCloudModel(
+  stalledModels: Map<string, number>,
+  model?: string
+): void {
+  if (model) {
+    stalledModels.delete(model);
+  } else {
+    stalledModels.clear();
+  }
+}
+
+export function buildResponseCacheKey(
+  prompt: string,
+  modeKey: string,
+  effectiveCloudModel: string,
+  style: string,
+  useStructured: boolean,
+  imgSig: string
+): string {
+  return `${modeKey}|${effectiveCloudModel}|${style}|${useStructured ? 'json' : 'md'}|${imgSig}|${prompt}`;
+}
+
+export function shouldCacheHybridResponse(entry: {
+  wasMockEcho?: boolean;
+  nanoUnavailable?: boolean;
+  fallbackUsed?: boolean;
+}): boolean {
+  return !entry.wasMockEcho && !entry.nanoUnavailable && !entry.fallbackUsed;
 }
 
 export function isCloudModelCoolingDown(

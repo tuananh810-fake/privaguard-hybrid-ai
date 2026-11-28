@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "PrivaGuard AI — Context-Aware Privacy Shield",
+  "short_name": "PrivaGuard AI",
+  "version": "6.5.0",
+  "description": "Local context-aware PII & format-preserving file shield for Gemini, ChatGPT & Claude. Intercepts pasted text and uploaded DOCX/PDF/JSON/TXT files in RAM (0 B leaked).",
+  "permissions": ["storage", "offscreen"],
+  "icons": {
+    "192": "icons/icon-192.png",
+    "512": "icons/icon-512.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "PrivaGuard AI Shield"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://gemini.google.com/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://grok.com/*",
+        "https://www.perplexity.ai/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import React, { memo, useEffect } from 'react';
 import { Cpu, KeyRound, Lock, RefreshCw, Shield, WifiOff, X } from 'lucide-react';
 import { RemoteSettings } from '../firebase';
-import { HybridResponse, ModeKey, NanoAvailability } from '../services/hybridAI';
+import { CloudModelPreference, HybridResponse, ModeKey, NanoAvailability } from '../services/hybridAI';
 import { CategoryFilter, PiiCategory, RedactionResult } from '../services/piiVault';
 
 export const MODE_OPTIONS: { key: ModeKey; label: string; desc: string }[] = [
@@ -26,6 +26,8 @@ export const CATEGORY_LABELS: { key: PiiCategory; label: string }[] = [
 interface TechDrawerProps {
   mode: ModeKey;
   onModeChange: (mode: ModeKey) => void;
+  cloudModelPref: CloudModelPreference;
+  onCloudModelPrefChange: (pref: CloudModelPreference) => void;
   simulatedOffline: boolean;
   onToggleSimulatedOffline: () => void;
   nanoStatus: NanoAvailability;
@@ -46,6 +48,8 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
   ({
     mode,
     onModeChange,
+    cloudModelPref,
+    onCloudModelPrefChange,
     simulatedOffline,
     onToggleSimulatedOffline,
     nanoStatus,
@@ -207,6 +211,26 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
                       {m.label}
                     </option>
                   ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="cloud-model-pref"
+                  className="mb-1.5 block text-[12.5px] text-[var(--n-muted)]"
+                >
+                  Cloud model preference
+                </label>
+                <select
+                  id="cloud-model-pref"
+                  name="cloudModelPref"
+                  value={cloudModelPref}
+                  onChange={(e) => onCloudModelPrefChange(e.target.value as CloudModelPreference)}
+                  className="w-full rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-3 py-1.5 text-[13px] text-[var(--n-text)] focus:border-[var(--n-accent)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--n-accent)]"
+                >
+                  <option value="auto">Auto ({remoteSettings.cloudModel} → Lite fallback)</option>
+                  <option value="gemini-3.6-flash">Pinned: gemini-3.6-flash (Primary)</option>
+                  <option value="gemini-3.5-flash-lite">Fast Lite: gemini-3.5-flash-lite</option>
                 </select>
               </div>
 

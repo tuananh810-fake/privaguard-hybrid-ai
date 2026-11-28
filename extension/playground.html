@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PrivaGuard Extension — Local AI Chat & File Interception Playground</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 780px;
+        margin: 28px auto;
+        padding: 0 16px;
+        background: #f9fafb;
+        color: #111827;
+      }
+      h1 { font-size: 20px; margin-bottom: 6px; }
+      p.sub { color: #4b5563; font-size: 13.5px; margin-top: 0; }
+      .samples { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+      .samples button {
+        border: 1px solid #d1d5db;
+        background: #ffffff;
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 12.5px;
+        cursor: pointer;
+      }
+      .samples button:hover { background: #f3f4f6; }
+      .chat-box {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      }
+      .dropzone {
+        border: 1.5px dashed #cbd5e1;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 12px;
+        background: #f8fafc;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 13px;
+      }
+      #messages {
+        min-height: 140px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .msg { padding: 10px 12px; border-radius: 8px; font-size: 13.5px; white-space: pre-wrap; word-break: break-word; }
+      .msg.user { background: #eef2ff; align-self: flex-end; max-width: 92%; }
+      .msg.assistant { background: #f3f4f6; align-self: flex-start; max-width: 92%; }
+      textarea {
+        width: 100%;
+        min-height: 105px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 14px;
+        font-family: inherit;
+        resize: vertical;
+        box-sizing: border-box;
+      }
+      .actions { margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px; }
+      .send-btn {
+        background: #0f766e;
+        color: #ffffff;
+        border: none;
+        border-radius: 7px;
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>PrivaGuard Extension — Local AI Chat &amp; File Interception Playground</h1>
+    <p class="sub">
+      Serve on <code>http://localhost</code> with the PrivaGuard extension loaded to test both
+      <strong>text context shielding</strong> (Cisco homework vs mixed trap vs confidential NDA) and
+      <strong>format-preserving file upload interception</strong> (<code>.docx</code>, <code>.pdf</code>, <code>.json</code>, <code>.csv</code>, <code>.env</code>, <code>.txt</code>).
+    </p>
+
+    <div class="samples">
+      <button type="button" data-sample="cisco">1. Cisco Networking Homework (Keep IPs)</button>
+      <button type="button" data-sample="mixed">2. Mixed Lab + Leaked API Key</button>
+      <button type="button" data-sample="nda">3. Confidential NDA &amp; Payout</button>
+      <button type="button" data-sample="devops">4. Production Incident Log</button>
+    </div>
+
+    <div class="chat-box" id="drop-zone">
+      <div class="dropzone">
+        <span><strong>Upload or drop any file (.docx, .pdf, .json, .env, .txt)</strong> — PrivaGuard intercepts before the AI receives it:</span>
+        <input type="file" id="file-upload" accept=".docx,.pdf,.json,.csv,.env,.md,.txt,.log,.png,.jpg,.jpeg,.webp" />
+      </div>
+
+      <div id="messages">
+        <div class="msg assistant" data-message-author-role="assistant">
+          Hi! Paste text or attach a .docx / .pdf / .json file. PrivaGuard intercepts sensitive files locally, keeps original formatting, and injects the safe file here!
+        </div>
+      </div>
+
+      <textarea
+        id="prompt-textarea"
+        placeholder="Ask AI anything or paste text here…"
+      ></textarea>
+      <div class="actions">
+        <button type="button" id="send-btn" class="send-btn">Send to Simulated AI</button>
+      </div>
+    </div>
+
+    <script>
+      const SAMPLES = {
+        cisco:
+          'Bài tập cấu hình router Cisco Packet Tracer: Router R1 interface G0/0 đặt IP 192.168.1.1 subnet mask 255.255.255.0 và định tuyến OSPF sang 10.0.0.2. Hãy viết lệnh cấu hình giúp mình.',
+        mixed:
+          'Bài tập OSPF Cisco: Router R1 192.168.10.1 nối R2 192.168.20.1 (mask 255.255.255.0). À mình vô tình dán luôn key AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ từ file .env vào script.',
+        nda:
+          'Confidential NDA Addendum — Client david.chen@northstarlabs.co (+1 650-442-9910), payout card 4532-8910-4421-7785, IBAN DE89370400440532013000. Check Clause 4.2 unlimited liability.',
+        devops:
+          'URGENT INCIDENT #4821 — Production auth outage on 192.168.42.19:8443 -> 34.117.59.81. Leaked AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ and ghp_9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ8891. Reported by tuananh.ops@acmecorp.io (+84 912-345-678).',
+      };
+
+      const ta = document.getElementById('prompt-textarea');
+      const messages = document.getElementById('messages');
+      const fileInput = document.getElementById('file-upload');
+      const dropZone = document.getElementById('drop-zone');
+
+      function appendMessage(role, text) {
+        const el = document.createElement('div');
+        el.className = `msg ${role}`;
+        if (role === 'assistant') el.setAttribute('data-message-author-role', 'assistant');
+        el.textContent = text;
+        messages.appendChild(el);
+      }
+
+      async function handleReceivedFile(file) {
+        if (!file) return;
+        const sizeKb = Math.max(1, Math.round(file.size / 1024));
+        appendMessage('user', `Attached file: ${file.name} (${file.type || 'unknown'}, ${sizeKb} KB)`);
+        let preview = '';
+        if (/\.(txt|md|json|csv|env|log)$/i.test(file.name)) {
+          preview = await file.text();
+        }
+        const tokens = preview.match(/\[[A-Z]+_\d+\]/g) || [];
+        const isSafe = file.name.toLowerCase().startsWith('safe-');
+        appendMessage(
+          'assistant',
+          isSafe
+            ? `Simulated Cloud AI received FORMAT-PRESERVED sanitized file "${file.name}" (${sizeKb} KB). ${
+                tokens.length > 0
+                  ? `Only safe tokens visible: ${Array.from(new Set(tokens)).join(', ')}.`
+                  : 'Original layout preserved, hidden text/metadata stripped!'
+              }`
+            : `Simulated Cloud AI received original file "${file.name}" (${sizeKb} KB).`
+        );
+      }
+
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files && fileInput.files[0]) {
+          handleReceivedFile(fileInput.files[0]);
+        }
+      });
+
+      dropZone.addEventListener('dragover', (e) => e.preventDefault());
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+          handleReceivedFile(e.dataTransfer.files[0]);
+        }
+      });
+
+      document.querySelectorAll('[data-sample]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const key = btn.getAttribute('data-sample');
+          ta.focus();
+          ta.value = SAMPLES[key] || '';
+          ta.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+      });
+
+      document.getElementById('send-btn').addEventListener('click', () => {
+        const text = ta.value.trim();
+        if (!text) return;
+        appendMessage('user', text);
+
+        const tokens = text.match(/\[[A-Z]+_\d+\]/g) || [];
+        appendMessage(
+          'assistant',
+          tokens.length > 0
+            ? `Simulated Cloud AI received ONLY safe placeholders (${tokens.join(', ')}). Immediate action: rotate ${tokens[0]} and notify ${tokens[1] || tokens[0]}.`
+            : `Simulated Cloud AI received full intact networking/lab prompt (${text.slice(0, 90)}…) and solved it cleanly with zero broken IPs!`
+        );
+        ta.value = '';
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    </script>
+  </body>
+</html>

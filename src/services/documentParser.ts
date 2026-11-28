@@ -8,6 +8,14 @@ export interface ParsedDocumentResult {
   meta: string;
 }
 
+export interface RawPdfTextItem {
+  str?: string;
+  hasEOL?: boolean;
+  transform?: number[];
+  width?: number;
+  height?: number;
+}
+
 export function getFileExtension(fileName: string): string {
   const idx = fileName.lastIndexOf('.');
   if (idx < 0) return '';
@@ -30,6 +38,81 @@ export function classifyDroppedFile(file: {
   if (IMAGE_EXTENSIONS.has(ext) || mime.startsWith('image/')) return 'image';
   if (TEXT_EXTENSIONS.has(ext) || mime.startsWith('text/')) return 'text';
   return 'unsupported';
+}
+
+/**
+ * Reconstructs clean, layout-aware text from pdfjs-dist `getTextContent().items`,
+ * preserving line breaks, headings, lists, and paragraph spacing via Y-coordinate deltas & hasEOL.
+ */
+export function reconstructPdfPageText(items: RawPdfTextItem[]): string {
+  const lines: string[] = [];
+  let currentLine = '';
+  let prevY: number | null = null;
+  let prevRightX: number | null = null;
+  let prevFontH = 11;
+
+  for (const item of items) {
+    const str = typeof item.str === 'string' ? item.str : '';
+    const hasTransform = Array.isArray(item.transform) && item.transform.length >= 6;
+    const x = hasTransform ? Number(item.transform![4]) : null;
+    const y = hasTransform ? Number(item.transform![5]) : null;
+    const fontH = Math.max(
+      typeof item.height === 'number' && item.height > 0 ? item.height : 0,
+      hasTransform ? Math.hypot(Number(item.transform![2]) || 0, Number(item.transform![3]) || 0) : 0,
+      prevFontH,
+      9
+    );
+
+    if (prevY !== null && y !== null) {
+      const deltaY = Math.abs(prevY - y);
+      const lineBreakThreshold = Math.max(3, fontH * 0.45);
+      if (deltaY > lineBreakThreshold) {
+        if (currentLine.trim()) {
+          lines.push(currentLine.replace(/[ \t]{2,}/g, ' ').trimEnd());
+        }
+        // Insert blank line on clear paragraph / heading separation
+        if (deltaY > fontH * 1.55 && lines.length > 0 && lines[lines.length - 1] !== '') {
+          lines.push('');
+        }
+        currentLine = '';
+        prevRightX = null;
+      }
+    }
+
+    if (str) {
+      if (currentLine.length > 0 && !currentLine.endsWith(' ') && !str.startsWith(' ')) {
+        const gap = x !== null && prevRightX !== null ? x - prevRightX : 2;
+        if (gap > Math.max(1.2, fontH * 0.12)) {
+          currentLine += ' ';
+        }
+      }
+      currentLine += str;
+    }
+
+    if (y !== null) prevY = y;
+    if (x !== null) {
+      const w = typeof item.width === 'number' && item.width > 0 ? item.width : str.length * fontH * 0.5;
+      prevRightX = x + w;
+    }
+    prevFontH = fontH;
+
+    if (item.hasEOL) {
+      if (currentLine.trim()) {
+        lines.push(currentLine.replace(/[ \t]{2,}/g, ' ').trimEnd());
+      }
+      currentLine = '';
+      prevRightX = null;
+    }
+  }
+
+  if (currentLine.trim()) {
+    lines.push(currentLine.replace(/[ \t]{2,}/g, ' ').trimEnd());
+  }
+
+  return lines
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /**
@@ -58,10 +141,10 @@ export async function parseDocumentLocally(file: File): Promise<ParsedDocumentRe
     for (let p = 1; p <= pagesToRead; p++) {
       const page = await pdf.getPage(p);
       const content = await page.getTextContent();
-      const strings = content.items
-        .map((item) => ('str' in item ? item.str : ''))
-        .filter(Boolean);
-      pageTexts.push(strings.join(' ').replace(/\s{2,}/g, ' ').trim());
+      const pageBody = reconstructPdfPageText(content.items as RawPdfTextItem[]);
+      if (pageBody) {
+        pageTexts.push(pagesToRead > 1 ? `--- Page ${p} ---\n${pageBody}` : pageBody);
+      }
     }
 
     await loadingTask.destroy();
@@ -72,7 +155,7 @@ export async function parseDocumentLocally(file: File): Promise<ParsedDocumentRe
         : '';
 
     return {
-      text: pageTexts.filter(Boolean).join('\n\n'),
+      text: pageTexts.join('\n\n'),
       meta: `${file.name} · ${pagesToRead} page${pagesToRead === 1 ? '' : 's'} extracted locally${truncatedNote}`,
     };
   }

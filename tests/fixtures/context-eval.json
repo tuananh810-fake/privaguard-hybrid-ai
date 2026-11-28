@@ -1,0 +1,380 @@
+[
+  {
+    "id": "edu-cisco-01",
+    "domain": "networking",
+    "lang": "vi",
+    "text": "Bài tập cấu hình router Cisco Packet Tracer: Router R1 interface G0/0 đặt IP 192.168.1.1 subnet mask 255.255.255.0 và định tuyến OSPF sang 10.0.0.2.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["192.168.1.1", "255.255.255.0", "10.0.0.2"]
+  },
+  {
+    "id": "edu-cisco-02",
+    "domain": "networking",
+    "lang": "en",
+    "text": "CCNA Lab 4 Homework: Configure VLAN 10 on Switch S1 with default gateway 172.16.10.1 and DHCP pool 172.16.10.50 on GNS3.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["172.16.10.1", "172.16.10.50"]
+  },
+  {
+    "id": "edu-subnet-03",
+    "domain": "networking",
+    "lang": "vi",
+    "text": "Đề bài chia subnet: Giả sử mạng công ty có dải 192.168.100.0 với subnet mask 255.255.255.192. Hãy tính số host khả dụng.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["192.168.100.0", "255.255.255.192"]
+  },
+  {
+    "id": "edu-rfc5737-04",
+    "domain": "networking",
+    "lang": "en",
+    "text": "Documentation example for BGP peering: connect 192.0.2.10 to 198.51.100.42 and fallback 203.0.113.7.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["192.0.2.10", "198.51.100.42", "203.0.113.7"]
+  },
+  {
+    "id": "edu-dns-loopback-05",
+    "domain": "networking",
+    "lang": "en",
+    "text": "Local development tutorial: bind server to 127.0.0.1:8080 and test DNS resolution against 8.8.8.8 and 1.1.1.1.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["127.0.0.1:8080", "8.8.8.8", "1.1.1.1"]
+  },
+  {
+    "id": "edu-wireshark-06",
+    "domain": "networking",
+    "lang": "en",
+    "text": "Wireshark lab assignment: filter packets from source 10.10.20.5 to destination 10.10.20.1 and explain the TCP handshake.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["10.10.20.5", "10.10.20.1"]
+  },
+  {
+    "id": "edu-nat-07",
+    "domain": "networking",
+    "lang": "vi",
+    "text": "Hướng dẫn giải bài tập NAT config trên Cisco: ip route 0.0.0.0 0.0.0.0 192.168.50.1 cho sinh viên năm 3.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["0.0.0.0", "192.168.50.1"]
+  },
+  {
+    "id": "edu-public-subnet-08",
+    "domain": "networking",
+    "lang": "en",
+    "text": "Exercise Problem 3: Given CIDR block 45.12.33.0 and subnet mask 255.255.255.224, calculate the broadcast address.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["45.12.33.0", "255.255.255.224"]
+  },
+  {
+    "id": "edu-stripe-test-09",
+    "domain": "coding",
+    "lang": "en",
+    "text": "Stripe sandbox tutorial: use test key sk_test_51N9xK2mPqR8vL1nW4zT7cB0fH6jY and test card 4242-4242-4242-4242 in unit tests.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["sk_test_51N9xK2mPqR8vL1nW4zT7cB0fH6jY", "4242-4242-4242-4242"]
+  },
+  {
+    "id": "edu-placeholder-key-10",
+    "domain": "coding",
+    "lang": "en",
+    "text": "README example: set Bearer example_token_placeholder_value and API key sk-live-1234567890abcdef123456 in your mock env.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["Bearer example_token_placeholder_value", "sk-live-1234567890abcdef123456"]
+  },
+  {
+    "id": "edu-email-rfc2606-11",
+    "domain": "coding",
+    "lang": "en",
+    "text": "Unit test fixture: send a mock signup payload with email user@example.com and backup admin@example.org.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["user@example.com", "admin@example.org"]
+  },
+  {
+    "id": "edu-phone-555-12",
+    "domain": "coding",
+    "lang": "en",
+    "text": "Sample JSON fixture for UI demo: phone (415) 555-0192 and dummy hotline 000-000-0000.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["(415) 555-0192", "000-000-0000"]
+  },
+  {
+    "id": "edu-ssn-dummy-13",
+    "domain": "coding",
+    "lang": "en",
+    "text": "Form validation documentation example: SSN format should match 123-45-6789 or 000-12-3456.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["123-45-6789", "000-12-3456"]
+  },
+  {
+    "id": "edu-db-localhost-14",
+    "domain": "coding",
+    "lang": "en",
+    "text": "Docker Compose tutorial: connect local Postgres using postgres://postgres:postgres@localhost:5432/demo_db for testing.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["postgres://postgres:postgres@localhost:5432/demo_db"]
+  },
+  {
+    "id": "edu-sku-luhn-fail-15",
+    "domain": "ecommerce",
+    "lang": "en",
+    "text": "Inventory query example: filter warehouse SKU 4532-8910-4421-7782 in SQL homework table.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["4532-8910-4421-7782"]
+  },
+  {
+    "id": "edu-order-12digit-16",
+    "domain": "ecommerce",
+    "lang": "vi",
+    "text": "Ví dụ truy vấn SQL cho mã đơn vận đơn tracking 012345678999 trong bài tập cơ sở dữ liệu.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["012345678999"]
+  },
+  {
+    "id": "edu-vi-sample-17",
+    "domain": "coding",
+    "lang": "vi",
+    "text": "Dữ liệu mẫu kiểm thử form đăng ký: email test@example.vn và mã thẻ mẫu 4111-1111-1111-1111.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["test@example.vn", "4111-1111-1111-1111"]
+  },
+  {
+    "id": "edu-low-entropy-key-18",
+    "domain": "coding",
+    "lang": "en",
+    "text": "Tutorial snippet: replace AIzaAAAAAAAAAAAAAAAAAAAAAAA with your real key from the console.",
+    "expectedContext": "EDUCATIONAL_SYNTHETIC",
+    "mustMask": [],
+    "mustKeep": ["AIzaAAAAAAAAAAAAAAAAAAAAAAA"]
+  },
+  {
+    "id": "sens-devops-01",
+    "domain": "devops",
+    "lang": "en",
+    "text": "URGENT INCIDENT: Production auth outage on 192.168.42.19:8443 -> 34.117.59.81. Leaked key AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ and ghp_9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ8891.",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["192.168.42.19:8443", "34.117.59.81", "AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ", "ghp_9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ8891"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-nda-02",
+    "domain": "legal",
+    "lang": "en",
+    "text": "Confidential NDA Addendum: Client david.chen@northstarlabs.co (+1 650-442-9910), payout card 4532-8910-4421-7785 and IBAN DE89370400440532013000.",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["david.chen@northstarlabs.co", "+1 650-442-9910", "4532-8910-4421-7785", "DE89370400440532013000"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-vi-contract-03",
+    "domain": "legal",
+    "lang": "vi",
+    "text": "Hợp đồng lao động nội bộ: CCCD 079095012345, SĐT 0912-345-678, email minh.anh@congty-fintech.vn, không được chia sẻ ra ngoài.",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["079095012345", "0912-345-678", "minh.anh@congty-fintech.vn"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-medical-04",
+    "domain": "healthcare",
+    "lang": "en",
+    "text": "Clinical patient intake MRN-8849201: SSN 412-88-9034, phone (415) 890-2214, email sarah.jenkins@gmail.com. HIPAA protected.",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["MRN-8849201", "412-88-9034", "(415) 890-2214", "sarah.jenkins@gmail.com"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-aws-pem-05",
+    "domain": "devops",
+    "lang": "en",
+    "text": "Production breach audit: AWS key AKIA9X2MPQR8VL1NW4ZT exposed alongside -----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEF\n-----END PRIVATE KEY-----",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["AKIA9X2MPQR8VL1NW4ZT"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-mongo-prod-06",
+    "domain": "devops",
+    "lang": "en",
+    "text": "Production database connection string leaked in log: mongodb+srv://prod_admin:X9kP2mQ8vL4n@cluster0.acmecorp.mongodb.net/billing",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["mongodb+srv://prod_admin:X9kP2mQ8vL4n@cluster0.acmecorp.mongodb.net/billing"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-jwt-07",
+    "domain": "devops",
+    "lang": "en",
+    "text": "Customer session token captured in incident trace: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyXzQ4MjEiLCJyb2xlIjoiYWRtaW4ifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyXzQ4MjEiLCJyb2xlIjoiYWRtaW4ifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-bearer-live-08",
+    "domain": "finance",
+    "lang": "en",
+    "text": "Billing webhook config (internal only): Bearer K9xMpQr8vL1nW4zT7cB0fH6jY3eU5aQ92",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["Bearer K9xMpQr8vL1nW4zT7cB0fH6jY3eU5aQ92"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-redis-prod-09",
+    "domain": "devops",
+    "lang": "en",
+    "text": "Rotate compromised production cache URI redis://cache_admin:X8kP2mQ9vL4nW7z@redis.prod-pay.internal:6379/0 immediately.",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["redis://cache_admin:X8kP2mQ9vL4nW7z@redis.prod-pay.internal:6379/0"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-vi-payroll-10",
+    "domain": "hr",
+    "lang": "vi",
+    "text": "Bảng lương tháng 11 tối mật: nhân viên cskh.lan@vinatech.vn, số thẻ thanh toán 4916-3385-0608-2832, SĐT 028-3822-1234.",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["cskh.lan@vinatech.vn", "4916-3385-0608-2832", "028-3822-1234"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-vi-medical-11",
+    "domain": "healthcare",
+    "lang": "vi",
+    "text": "Hồ sơ y tế bệnh nhân PID-7731902: căn cước 001092038471, liên hệ người nhà +84 988-221-456.",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["PID-7731902", "001092038471", "+84 988-221-456"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-openai-key-12",
+    "domain": "devops",
+    "lang": "en",
+    "text": "Production incident: developer pushed sk-proj-9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ into repo.",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["sk-proj-9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-nda-synth-card-13",
+    "domain": "legal",
+    "lang": "en",
+    "text": "Confidential Contractor Payout: Card 4532-8910-4421-7782 and email billing@northstarlabs.co.",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["4532-8910-4421-7782", "billing@northstarlabs.co"],
+    "mustKeep": []
+  },
+  {
+    "id": "sens-firewall-14",
+    "domain": "devops",
+    "lang": "en",
+    "text": "Production firewall lock required on upstream host 34.117.59.81 and staging node 10.24.8.15.",
+    "expectedContext": "SENSITIVE_REAL",
+    "mustMask": ["34.117.59.81", "10.24.8.15"],
+    "mustKeep": []
+  },
+  {
+    "id": "mixed-cisco-key-01",
+    "domain": "mixed",
+    "lang": "vi",
+    "text": "Bài tập cấu hình router Cisco Packet Tracer trên 192.168.1.1 (mask 255.255.255.0) nhưng mình dán nhầm API key AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ vào script.",
+    "expectedContext": "MIXED_HYBRID",
+    "mustMask": ["AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ"],
+    "mustKeep": ["192.168.1.1", "255.255.255.0"]
+  },
+  {
+    "id": "mixed-subnet-cccd-02",
+    "domain": "mixed",
+    "lang": "vi",
+    "text": "Đề bài chia subnet 10.0.10.0 cho lớp mạng máy tính. Sinh viên nộp bài: CCCD 079099112233.",
+    "expectedContext": "MIXED_HYBRID",
+    "mustMask": ["079099112233"],
+    "mustKeep": ["10.0.10.0"]
+  },
+  {
+    "id": "mixed-docker-ghp-03",
+    "domain": "mixed",
+    "lang": "en",
+    "text": "Local tutorial: run Postgres at postgres://postgres:postgres@localhost:5432/app and clone using ghp_9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ8891.",
+    "expectedContext": "MIXED_HYBRID",
+    "mustMask": ["ghp_9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ8891"],
+    "mustKeep": ["postgres://postgres:postgres@localhost:5432/app"]
+  },
+  {
+    "id": "mixed-stripe-real-card-04",
+    "domain": "mixed",
+    "lang": "en",
+    "text": "Unit test fixture: sandbox card 4242-4242-4242-4242 works, why does my real card 4916-3385-0608-2832 fail?",
+    "expectedContext": "MIXED_HYBRID",
+    "mustMask": ["4916-3385-0608-2832"],
+    "mustKeep": ["4242-4242-4242-4242"]
+  },
+  {
+    "id": "mixed-email-sample-real-05",
+    "domain": "mixed",
+    "lang": "en",
+    "text": "Tutorial example uses user@example.com, please forward the output to tuananh.ops@acmecorp.io.",
+    "expectedContext": "MIXED_HYBRID",
+    "mustMask": ["tuananh.ops@acmecorp.io"],
+    "mustKeep": ["user@example.com"]
+  },
+  {
+    "id": "mixed-vi-cisco-openai-06",
+    "domain": "mixed",
+    "lang": "vi",
+    "text": "Bài tập OSPF Cisco: Router R1 192.168.10.1 nối R2 192.168.20.1. Code gọi AI dùng key sk-proj-8vL1nW4zT7cB0fH6jY3eU5aQ9xK2mPqR.",
+    "expectedContext": "MIXED_HYBRID",
+    "mustMask": ["sk-proj-8vL1nW4zT7cB0fH6jY3eU5aQ9xK2mPqR"],
+    "mustKeep": ["192.168.10.1", "192.168.20.1"]
+  },
+  {
+    "id": "mixed-localhost-prod-db-07",
+    "domain": "mixed",
+    "lang": "en",
+    "text": "Migration docs: compare local 127.0.0.1:5432 against postgres://app_svc:P9mK4xQ8vL2n@db.prod-bank.internal:5432/ledger.",
+    "expectedContext": "MIXED_HYBRID",
+    "mustMask": ["postgres://app_svc:P9mK4xQ8vL2n@db.prod-bank.internal:5432/ledger"],
+    "mustKeep": ["127.0.0.1:5432"]
+  },
+  {
+    "id": "mixed-wireshark-phone-08",
+    "domain": "mixed",
+    "lang": "vi",
+    "text": "Bài lab Wireshark bắt gói tin từ 10.0.0.1 đến 10.0.0.5, có gì gọi tôi qua số +84 912-345-678 nhé.",
+    "expectedContext": "MIXED_HYBRID",
+    "mustMask": ["+84 912-345-678"],
+    "mustKeep": ["10.0.0.1", "10.0.0.5"]
+  },
+  {
+    "id": "mixed-rfc-aws-09",
+    "domain": "mixed",
+    "lang": "en",
+    "text": "Documentation sample server 203.0.113.5 configured with live IAM key AKIA9X2MPQR8VL1NW4ZT.",
+    "expectedContext": "MIXED_HYBRID",
+    "mustMask": ["AKIA9X2MPQR8VL1NW4ZT"],
+    "mustKeep": ["203.0.113.5"]
+  },
+  {
+    "id": "mixed-ssn-dummy-real-10",
+    "domain": "mixed",
+    "lang": "en",
+    "text": "Sample guide shows 123-45-6789 as format, replace with client SSN 412-88-9034.",
+    "expectedContext": "MIXED_HYBRID",
+    "mustMask": ["412-88-9034"],
+    "mustKeep": ["123-45-6789"]
+  }
+]

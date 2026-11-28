@@ -11,7 +11,9 @@ import {
   verifyZeroLeak,
 } from '../src/services/piiVault.ts';
 import {
+  buildResponseCacheKey,
   buildTaskPrompt,
+  clearStalledCloudModel,
   CLOUD_TTFT_TIMEOUT_MS,
   extractRiskBanner,
   isCloudModelCoolingDown,
@@ -21,12 +23,13 @@ import {
   resolveEffectiveCloudModel,
   sanitizeNanoResult,
   shouldApplyCloudTtftTimeout,
+  shouldCacheHybridResponse,
   shouldEmitStreamChunk,
   STALLED_MODEL_COOLDOWN_MS,
   structuredAuditToMarkdown,
 } from '../src/services/hybridHelpers.ts';
 import { matchPiiBoxesFromOcrLines } from '../src/services/ocrPiiMatcher.ts';
-import { classifyDroppedFile, getFileExtension } from '../src/services/documentParser.ts';
+import { classifyDroppedFile, getFileExtension, reconstructPdfPageText } from '../src/services/documentParser.ts';
 import {
   buildNanoChunkPlan,
   discoverSemanticEntitiesWithNano,
@@ -35,6 +38,23 @@ import {
   NANO_MANUAL_SCAN_TIMEOUT_MS,
   parseNanoEntityResponse,
 } from '../src/services/nanoEntityDiscovery.ts';
+import {
+  adjudicateAmbiguousWithNano,
+  analyzeWithContextGuard,
+  classifyIpAddress,
+  computeShannonEntropy,
+  isKnownTestCard,
+  isPlaceholderSecret,
+  isValidLuhn,
+} from '../src/services/sensitivityEngine.ts';
+import {
+  exportSanitizedDocumentAs,
+  matchPdfTextItemsToVault,
+  redactDocxBuffer,
+  redactJsonTextPreservingSyntax,
+  redactPdfBuffer,
+} from '../src/services/fileRedactor.ts';
+import { exportAnalysisReport, toPdfSafeText } from '../src/services/reportExporter.ts';
 import { sanitizeAnalysisPayload } from '../src/services/historySanitizer.ts';
 
 test('redacts JWT, PEM private key, and DB connection URI with zero leaks', () => {
@@ -452,9 +472,9 @@ test('v6.3 discoverSemanticEntitiesWithNano: reports timedOut=true on slow Nano,
   assert.deepEqual(abortedRes.entities, []);
 });
 
-test('v6.3 cloud TTFT cooldown: 8s timeout + 5m session bypass routes stalled primary model straight to Lite fallback', () => {
-  assert.equal(CLOUD_TTFT_TIMEOUT_MS, 8_000);
-  assert.equal(STALLED_MODEL_COOLDOWN_MS, 300_000);
+test('v6.3 cloud TTFT cooldown: 12s timeout + 90s session bypass routes stalled primary model straight to Lite fallback', () => {
+  assert.equal(CLOUD_TTFT_TIMEOUT_MS, 12_000);
+  assert.equal(STALLED_MODEL_COOLDOWN_MS, 90_000);
 
   const stalled = new Map<string, number>();
   const t0 = 1_000_000;
@@ -613,4 +633,322 @@ test('v6.3.2 parseNanoEntityResponse: rejects Chromium mock echo cleanly via isM
   assert.deepEqual(parseNanoEntityResponse('[{"text":"Elena Vance","type":"PERSON"}]'), [
     { text: 'Elena Vance', type: 'PERSON' },
   ]);
+});
+
+test('v6.4 sensitivityEngine Tier 0: Luhn checksum, Shannon entropy, placeholder secret & RFC IP validators', () => {
+  assert.equal(isValidLuhn('4916-3385-0608-2832'), true);
+  assert.equal(isValidLuhn('4532-8910-4421-7785'), true);
+  assert.equal(isValidLuhn('4532-8910-4421-7782'), false);
+  assert.equal(isKnownTestCard('4242-4242-4242-4242'), true);
+  assert.equal(isKnownTestCard('4916-3385-0608-2832'), false);
+
+  assert.ok(computeShannonEntropy('D9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ') > 4.0);
+  assert.ok(computeShannonEntropy('AAAAAAAAAAAAAAAAAAAA') < 0.5);
+  assert.equal(isPlaceholderSecret('sk_test_51N9xK2mPqR8vL1nW4zT7cB0fH6jY'), true);
+  assert.equal(isPlaceholderSecret('AIzaAAAAAAAAAAAAAAAAAAAAAAA'), true);
+  assert.equal(isPlaceholderSecret('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'), false);
+
+  assert.equal(classifyIpAddress('127.0.0.1:8080'), 'LOOPBACK_MASK_DNS');
+  assert.equal(classifyIpAddress('255.255.255.0'), 'LOOPBACK_MASK_DNS');
+  assert.equal(classifyIpAddress('192.0.2.10'), 'BENCHMARK_DOC');
+  assert.equal(classifyIpAddress('192.168.1.1'), 'RFC1918_PRIVATE');
+  assert.equal(classifyIpAddress('34.117.59.81'), 'PUBLIC_IP');
+});
+
+test('v6.4 sensitivityEngine Tier 1: preserves Cisco/networking homework IPs while hard-masking leaked real secrets', () => {
+  const ciscoHomework =
+    'Bài tập Cisco Packet Tracer: cấu hình Router R1 interface G0/0 IP 192.168.1.1 mask 255.255.255.0 OSPF sang 10.0.0.2.';
+  const hwRes = analyzeWithContextGuard(ciscoHomework, { smartContextGuard: true });
+  assert.equal(hwRes.contextKind, 'EDUCATIONAL_SYNTHETIC');
+  assert.equal(hwRes.maskedByDefault.length, 0);
+  assert.equal(hwRes.keptSafeByContext.length, 3);
+  assert.equal(hwRes.redactedText, ciscoHomework);
+
+  // Mixed trap: same Cisco homework + accidentally leaked live API key
+  const mixedText = `${ciscoHomework} Note: accidentally pasted AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ here.`;
+  const mixedRes = analyzeWithContextGuard(mixedText, { smartContextGuard: true });
+  assert.equal(mixedRes.contextKind, 'MIXED_HYBRID');
+  assert.equal(mixedRes.maskedByDefault.length, 1);
+  assert.equal(mixedRes.maskedByDefault[0].isHardSecret, true);
+  assert.equal(mixedRes.keptSafeByContext.length, 3);
+  assert.ok(mixedRes.redactedText.includes('192.168.1.1'));
+  assert.ok(!mixedRes.redactedText.includes('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+  assert.equal(mixedRes.leaksFound, 0);
+
+  // Strict mode override (smartContextGuard: false) masks everything including lab IPs
+  const strictRes = analyzeWithContextGuard(ciscoHomework, { smartContextGuard: false });
+  assert.equal(strictRes.contextKind, 'SENSITIVE_REAL');
+  assert.equal(strictRes.maskedByDefault.length, 3);
+  assert.ok(!strictRes.redactedText.includes('192.168.1.1'));
+});
+
+test('v6.4 sensitivityEngine Tier 2: adjudicateAmbiguousWithNano degrades cleanly and never downgrades hard secrets', async () => {
+  const mixed = analyzeWithContextGuard(
+    'Quick note: server 10.1.2.3 with live key AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ.',
+    { smartContextGuard: true }
+  );
+  // In Node without Chrome LanguageModel, gracefully falls back to Tier 1 without throwing
+  const fallback = await adjudicateAmbiguousWithNano(
+    'Quick note: server 10.1.2.3 with live key AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ.',
+    mixed.entities
+  );
+  assert.equal(fallback.usedNano, false);
+  assert.equal(fallback.timedOut, false);
+  const secretEntity = fallback.entities.find((e) => e.category === 'SECRET');
+  assert.equal(secretEntity?.decision, 'MASK_REQUIRED');
+  assert.equal(secretEntity?.isHardSecret, true);
+
+  // With mocked LanguageModel attempting to downgrade a hard secret, invariant protects it
+  const g = globalThis as unknown as { LanguageModel?: unknown };
+  const prevLM = g.LanguageModel;
+  try {
+    g.LanguageModel = {
+      availability: async () => 'available',
+      create: async () => ({
+        prompt: async () =>
+          JSON.stringify([
+            { text: '10.1.2.3', sensitive: false, reason: 'Local lab node' },
+            { text: 'AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ', sensitive: false, reason: 'Fake attempt' },
+          ]),
+        destroy: () => {},
+      }),
+    };
+    const adjudicated = await adjudicateAmbiguousWithNano(
+      'Quick note: server 10.1.2.3 with live key AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ.',
+      mixed.entities
+    );
+    assert.equal(adjudicated.usedNano, true);
+    assert.equal(adjudicated.entities.find((e) => e.original === '10.1.2.3')?.decision, 'KEEP_SAFE_CONTEXT');
+    assert.equal(
+      adjudicated.entities.find((e) => e.original === 'AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ')?.decision,
+      'MASK_REQUIRED'
+    );
+  } finally {
+    if (prevLM === undefined) delete g.LanguageModel;
+    else g.LanguageModel = prevLM;
+  }
+});
+
+test('v6.5 fileRedactor JSON: preserves valid JSON syntax, keeps benign RFC example, masks live secrets', () => {
+  const inputJson = JSON.stringify(
+    {
+      env: 'tutorial',
+      exampleEmail: 'user@example.com',
+      leakedKey: 'AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ',
+      ownerEmail: 'tuananh.ops@acmecorp.io',
+      nested: { count: 42, active: true },
+    },
+    null,
+    2
+  );
+
+  const res = redactJsonTextPreservingSyntax(inputJson, { smartContextGuard: true });
+  assert.equal(res.validJson, true);
+  assert.equal(res.analysis.contextKind, 'MIXED_HYBRID');
+  const parsed = JSON.parse(res.redactedText) as Record<string, unknown>;
+  assert.equal(parsed.exampleEmail, 'user@example.com');
+  assert.ok(String(parsed.leakedKey).startsWith('[SECRET_'));
+  assert.ok(String(parsed.ownerEmail).startsWith('[EMAIL_'));
+  assert.ok(!res.redactedText.includes('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+  assert.ok(!res.redactedText.includes('tuananh.ops@acmecorp.io'));
+  assert.deepEqual(parsed.nested, { count: 42, active: true });
+});
+
+test('v6.5 fileRedactor DOCX: merges fragmented <w:t> runs, preserves styles/tables, keeps Cisco IP, scrubs core.xml', async () => {
+  const jszipMod = await import('jszip');
+  const JSZip = jszipMod.default ?? jszipMod;
+
+  const zip = new JSZip();
+  zip.file(
+    'word/document.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Bài tập Cisco Packet Tracer: đặt IP 192.168.1.1 mask 255.255.255.0.</w:t></w:r></w:p>
+        <w:tbl><w:tr><w:tc><w:p>
+          <w:r><w:rPr><w:b/></w:rPr><w:t>CCCD: </w:t></w:r>
+          <w:r><w:t>0790</w:t></w:r>
+          <w:r><w:t>9501</w:t></w:r>
+          <w:r><w:t>2345</w:t></w:r>
+          <w:r><w:t> · Key: </w:t></w:r>
+          <w:r><w:t>AIzaSyD9xK2m</w:t></w:r>
+          <w:r><w:t>PqR8vL1nW4zT7cB0fH6jY3eU5aQ</w:t></w:r>
+        </w:p></w:tc></w:tr></w:tbl>
+      </w:body>
+    </w:document>`
+  );
+  zip.file(
+    'docProps/core.xml',
+    `<?xml version="1.0" encoding="UTF-8"?>
+    <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">
+      <dc:creator>Nguyen Tuan Anh</dc:creator>
+      <cp:lastModifiedBy>Secret Author</cp:lastModifiedBy>
+      <dc:title>Confidential Salary Sheet</dc:title>
+    </cp:coreProperties>`
+  );
+
+  const inputBytes = await zip.generateAsync({ type: 'uint8array' });
+  const result = await redactDocxBuffer(inputBytes, { smartContextGuard: true });
+
+  assert.equal(result.analysis.contextKind, 'MIXED_HYBRID');
+  assert.equal(result.xmlFilesTouched, 1);
+  assert.equal(result.metadataStripped, true);
+
+  const outZip = await JSZip.loadAsync(result.bytes);
+  const outDocXml = await outZip.file('word/document.xml')!.async('string');
+  const outCoreXml = await outZip.file('docProps/core.xml')!.async('string');
+
+  // Styles & tables preserved
+  assert.ok(outDocXml.includes('<w:rPr><w:b/></w:rPr>'));
+  assert.ok(outDocXml.includes('<w:tbl>'));
+  // Cisco lab IP preserved intact
+  assert.ok(outDocXml.includes('192.168.1.1'));
+  // Split CCCD & split API key completely removed and tokenized
+  assert.ok(outDocXml.includes('[ID_1]'));
+  assert.ok(outDocXml.includes('[SECRET_1]'));
+  assert.ok(!outDocXml.includes('0790'));
+  assert.ok(!outDocXml.includes('AIzaSyD9xK2m'));
+  assert.ok(!outDocXml.includes('PqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+  // Author metadata scrubbed
+  assert.ok(!outCoreXml.includes('Nguyen Tuan Anh'));
+  assert.ok(!outCoreXml.includes('Secret Author'));
+  assert.ok(!outCoreXml.includes('Confidential Salary Sheet'));
+});
+
+test('v6.5 fileRedactor PDF: matches split text-item bboxes, strips metadata, and outputs valid PDF with 0 raw secrets', async () => {
+  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+
+  // Pure bbox span matcher check (secret split across two adjacent PDF items)
+  const boxes = matchPdfTextItemsToVault(
+    [
+      { str: 'API key: ', transform: [12, 0, 0, 12, 40, 700], width: 48, height: 12 },
+      { str: 'AIzaSyD9xK2m', transform: [12, 0, 0, 12, 88, 700], width: 72, height: 12 },
+      { str: 'PqR8vL1nW4zT7cB0fH6jY3eU5aQ', transform: [12, 0, 0, 12, 160, 700], width: 150, height: 12 },
+    ],
+    [
+      {
+        token: '[SECRET_1]',
+        category: 'SECRET',
+        original: 'AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ',
+        source: 'regex',
+      },
+    ]
+  );
+  assert.equal(boxes.length, 1);
+  assert.equal(boxes[0].token, '[SECRET_1]');
+  assert.ok(boxes[0].width > 200);
+
+  // End-to-end PDF redaction on a real PDFDocument
+  const srcPdf = await PDFDocument.create();
+  srcPdf.setAuthor('Private Author Name');
+  srcPdf.setTitle('Confidential Production Dump');
+  const font = await srcPdf.embedFont(StandardFonts.Helvetica);
+  const page = srcPdf.addPage([612, 792]);
+  page.drawText('Cisco Packet Tracer lab 192.168.1.1 with leaked AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ', {
+    x: 40,
+    y: 720,
+    size: 11,
+    font,
+  });
+  const srcBytes = await srcPdf.save();
+
+  const redacted = await redactPdfBuffer(srcBytes, { smartContextGuard: true });
+  assert.equal(redacted.pagesRedacted, 1);
+  assert.equal(redacted.metadataStripped, true);
+  assert.equal(redacted.analysis.contextKind, 'MIXED_HYBRID');
+  assert.ok(redacted.boxesDrawn >= 1);
+
+  const rawPdfAscii = Buffer.from(redacted.bytes).toString('latin1');
+  assert.ok(rawPdfAscii.startsWith('%PDF-'));
+  assert.ok(!rawPdfAscii.includes('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+  assert.ok(!rawPdfAscii.includes('Private Author Name'));
+  assert.ok(!rawPdfAscii.includes('Confidential Production Dump'));
+});
+
+test('v7.0 model cache isolation & cooldown clear: fallback never poisons gemini-3.6-flash cache', () => {
+  const kPrimary = buildResponseCacheKey('prompt', 'PREFER_IN_CLOUD', 'gemini-3.6-flash', 'concise', true, 'no-img');
+  const kFallback = buildResponseCacheKey('prompt', 'PREFER_IN_CLOUD', 'gemini-3.5-flash-lite', 'concise', true, 'no-img');
+  assert.notEqual(kPrimary, kFallback);
+
+  assert.equal(shouldCacheHybridResponse({ wasMockEcho: false, nanoUnavailable: false, fallbackUsed: false }), true);
+  assert.equal(shouldCacheHybridResponse({ wasMockEcho: false, nanoUnavailable: false, fallbackUsed: true }), false);
+  assert.equal(shouldCacheHybridResponse({ wasMockEcho: true, nanoUnavailable: false, fallbackUsed: false }), false);
+
+  const stalled = new Map<string, number>();
+  markCloudModelStalled(stalled, 'gemini-3.6-flash', 1_000);
+  assert.equal(isCloudModelCoolingDown(stalled, 'gemini-3.6-flash', STALLED_MODEL_COOLDOWN_MS, 20_000), true);
+  clearStalledCloudModel(stalled, 'gemini-3.6-flash');
+  assert.equal(isCloudModelCoolingDown(stalled, 'gemini-3.6-flash', STALLED_MODEL_COOLDOWN_MS, 20_000), false);
+});
+
+test('v7.0 reconstructPdfPageText: preserves headings, line breaks, and paragraph gaps instead of flattening', () => {
+  const reconstructed = reconstructPdfPageText([
+    { str: 'LABORATORY 10', transform: [14, 0, 0, 14, 40, 760], width: 120, height: 14, hasEOL: true },
+    { str: '1. Introduction', transform: [12, 0, 0, 12, 40, 730], width: 100, height: 12, hasEOL: true },
+    { str: 'The final stage', transform: [10, 0, 0, 10, 40, 712], width: 70, height: 10 },
+    { str: 'integrates CPU.', transform: [10, 0, 0, 10, 114, 712], width: 80, height: 10, hasEOL: true },
+    { str: 'Required Hardware: Zedboard.', transform: [10, 0, 0, 10, 40, 680], width: 140, height: 10 },
+  ]);
+
+  assert.ok(reconstructed.includes('LABORATORY 10\n'));
+  assert.ok(reconstructed.includes('1. Introduction\nThe final stage integrates CPU.'));
+  assert.ok(reconstructed.includes('\n\nRequired Hardware: Zedboard.'));
+});
+
+test('v7.0 reportExporter & exportSanitizedDocumentAs: exports valid .docx, .pdf, .json, .md, and .txt artifacts', async () => {
+  assert.equal(toPdfSafeText('Hợp đồng mật — Nguyễn Tuấn Anh · Đắk Lắk'), 'Hop dong mat - Nguyen Tuan Anh | Dak Lak');
+
+  const input = {
+    task: 'risk_audit',
+    markdown: '### Risk Level\n**HIGH** — Exposed [SECRET_1] on [IP_1].\n- Rotate [SECRET_1] immediately.',
+    result: {
+      text: '### Risk Level\n**HIGH**',
+      inferenceSource: 'IN_CLOUD' as const,
+      latencyMs: 2100,
+      ttftMs: 900,
+      modelUsed: 'gemini-3.6-flash (Cloud)',
+    },
+    structuredAudit: null,
+    isHistoricalView: false,
+    rehydratedLocally: false,
+    payloadText: 'Exposed [SECRET_1] on [IP_1].',
+    vaultCount: 2,
+    bytesShielded: 44,
+    leakCount: 0,
+    sourceCounts: { regex: 2, nano: 0, manual: 0 },
+  };
+
+  const mdArt = await exportAnalysisReport(input, 'md');
+  assert.ok(mdArt.fileName.endsWith('.md'));
+  assert.ok(Buffer.from(mdArt.bytes).toString('utf8').includes('Sanitized Payload SHA-256'));
+
+  const jsonArt = await exportAnalysisReport(input, 'json');
+  assert.ok(jsonArt.fileName.endsWith('.json'));
+  const parsedJson = JSON.parse(Buffer.from(jsonArt.bytes).toString('utf8')) as {
+    modelUsed: string;
+    privacyProof: { maskedCount: number };
+  };
+  assert.equal(parsedJson.modelUsed, 'gemini-3.6-flash (Cloud)');
+  assert.equal(parsedJson.privacyProof.maskedCount, 2);
+
+  const docxArt = await exportAnalysisReport(input, 'docx');
+  assert.ok(docxArt.fileName.endsWith('.docx'));
+  const jszipMod = await import('jszip');
+  const JSZip = jszipMod.default ?? jszipMod;
+  const docxZip = await JSZip.loadAsync(docxArt.bytes);
+  const docXml = await docxZip.file('word/document.xml')!.async('string');
+  assert.ok(docXml.includes('[SECRET_1]'));
+
+  const pdfArt = await exportAnalysisReport(input, 'pdf');
+  assert.ok(pdfArt.fileName.endsWith('.pdf'));
+  assert.ok(Buffer.from(pdfArt.bytes).toString('latin1').startsWith('%PDF-'));
+
+  const safeDocx = await exportSanitizedDocumentAs(
+    'Production incident: leaked AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ',
+    null,
+    'docx',
+    { smartContextGuard: true }
+  );
+  assert.ok(safeDocx.fileName.endsWith('.docx'));
+  assert.equal(safeDocx.contextAnalysis.leaksFound, 0);
 });

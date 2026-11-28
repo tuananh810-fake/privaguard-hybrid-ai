@@ -2,7 +2,9 @@ import { getGenerativeModel, InferenceMode, OnDeviceParams, Part, Schema } from 
 import { ai } from '../firebase';
 import {
   AnalysisTask,
+  buildResponseCacheKey,
   buildTaskPrompt,
+  clearStalledCloudModel,
   CLOUD_TTFT_TIMEOUT_MS,
   extractRiskBanner,
   isMockNanoEcho,
@@ -12,6 +14,7 @@ import {
   resolveEffectiveCloudModel,
   sanitizeNanoResult,
   shouldApplyCloudTtftTimeout,
+  shouldCacheHybridResponse,
   shouldEmitStreamChunk,
   StructuredAuditReport,
   StructuredFinding,
@@ -30,7 +33,11 @@ export { buildTaskPrompt, extractRiskBanner, parseStructuredAudit, structuredAud
 
 export type ModeKey = 'PREFER_ON_DEVICE' | 'ONLY_ON_DEVICE' | 'PREFER_IN_CLOUD' | 'ONLY_IN_CLOUD';
 
+export type CloudModelPreference = 'auto' | 'gemini-3.6-flash' | 'gemini-3.5-flash-lite';
+
 export type NanoAvailability = 'available' | 'downloadable' | 'downloading' | 'unavailable';
+
+export type FallbackReason = 'rate_limit' | 'ttft_timeout' | 'cooldown_bypass';
 
 export interface HybridResponse {
   text: string;
@@ -42,6 +49,7 @@ export interface HybridResponse {
   nanoUnavailable?: boolean;
   cached?: boolean;
   fallbackUsed?: boolean;
+  fallbackReason?: FallbackReason | null;
   structuredAudit?: StructuredAuditReport | null;
 }
 
@@ -105,13 +113,19 @@ const SECURITY_AUDIT_SCHEMA = Schema.object({
 function makeCacheKey(
   prompt: string,
   modeKey: ModeKey,
-  cloudModel: string,
+  effectiveCloudModel: string,
   style: string,
   useStructured: boolean,
   image: AttachedImage | null
 ): string {
-  const imgSig = image ? `${image.name}:${image.base64Data.length}` : 'no-img';
-  return `${modeKey}|${cloudModel}|${style}|${useStructured ? 'json' : 'md'}|${imgSig}|${prompt}`;
+  const imgSig = image
+    ? `${image.name}:${image.base64Data.length}:${image.base64Data.slice(0, 24)}:${image.base64Data.slice(-24)}`
+    : 'no-img';
+  return buildResponseCacheKey(prompt, modeKey, effectiveCloudModel, style, useStructured, imgSig);
+}
+
+export function clearCloudModelCooldown(model?: string): void {
+  clearStalledCloudModel(stalledCloudModels, model);
 }
 
 function getSystemInstruction(style = 'concise_executive'): string {
@@ -418,9 +432,23 @@ export async function generateHybridStream(
   useStructuredAudit = false,
   nanoAvailable = false
 ): Promise<HybridResponse> {
-  const cacheKey = makeCacheKey(prompt, modeKey, cloudModel, systemPromptStyle, useStructuredAudit, image);
+  const { model: activeCloudModel, bypassedToFallback } = resolveEffectiveCloudModel(
+    cloudModel,
+    FALLBACK_CLOUD_MODEL,
+    modeKey,
+    stalledCloudModels
+  );
+
+  const cacheKey = makeCacheKey(
+    prompt,
+    modeKey,
+    activeCloudModel,
+    systemPromptStyle,
+    useStructuredAudit,
+    image
+  );
   const cached = responseCache.get(cacheKey);
-  if (cached && !cached.wasMockEcho) {
+  if (cached && shouldCacheHybridResponse(cached)) {
     onChunk?.(cached.text);
     return { ...cached, latencyMs: 1, ttftMs: 1, cached: true };
   }
@@ -445,15 +473,8 @@ export async function generateHybridStream(
     });
   }
 
-  const { model: activeCloudModel, bypassedToFallback } = resolveEffectiveCloudModel(
-    cloudModel,
-    FALLBACK_CLOUD_MODEL,
-    modeKey,
-    stalledCloudModels
-  );
-
   const storeInCache = (entry: HybridResponse) => {
-    if (entry.wasMockEcho || entry.nanoUnavailable) return;
+    if (!shouldCacheHybridResponse(entry)) return;
     if (responseCache.size >= MAX_CACHE_ENTRIES) {
       const firstKey = responseCache.keys().next().value;
       if (firstKey) responseCache.delete(firstKey);
@@ -478,10 +499,10 @@ export async function generateHybridStream(
       onChunk,
       signal
     );
-    const finalRes =
+    const finalRes: HybridResponse =
       bypassedToFallback && res.inferenceSource !== 'ON_DEVICE'
-        ? { ...res, fallbackUsed: true }
-        : res;
+        ? { ...res, fallbackUsed: true, fallbackReason: 'cooldown_bypass' }
+        : { ...res, fallbackUsed: false, fallbackReason: null };
     storeInCache(finalRes);
     return finalRes;
   } catch (err) {
@@ -537,8 +558,11 @@ export async function generateHybridStream(
         onChunk,
         signal
       );
-      const taggedFallback = { ...fallbackRes, fallbackUsed: true };
-      storeInCache(taggedFallback);
+      const taggedFallback: HybridResponse = {
+        ...fallbackRes,
+        fallbackUsed: true,
+        fallbackReason: isTimeout ? 'ttft_timeout' : 'rate_limit',
+      };
       return taggedFallback;
     }
     if (isRateLimitOrTransientError(err)) {

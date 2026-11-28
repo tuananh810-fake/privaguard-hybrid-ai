@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Eraser, RefreshCw, ScanSearch, ShieldCheck, Undo2, X } from 'lucide-react';
+import { Download, Eraser, RefreshCw, ScanSearch, ShieldCheck, Undo2, X } from 'lucide-react';
 import { AttachedImage } from '../services/hybridAI';
 import { CategoryFilter, DEFAULT_CATEGORY_FILTER } from '../services/piiVault';
 import { CanvasMaskBox, matchPiiBoxesFromOcrLines, OcrLine } from '../services/ocrPiiMatcher';
@@ -220,6 +220,17 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
     );
   }
 
+  function handleDownloadPng() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const pngUrl = canvas.toDataURL('image/png');
+    const baseName = image.name.replace(/\.[^.]+$/, '') || 'image';
+    const a = document.createElement('a');
+    a.href = pngUrl;
+    a.download = `privaguard-redacted-${baseName}.png`;
+    a.click();
+  }
+
   return (
     <div
       role="dialog"
@@ -311,6 +322,16 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadPng}
+              disabled={scanning || boxes.length === 0}
+              title="Download flattened PNG with black redaction boxes for external AI tools"
+              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download PNG
+            </button>
             <button
               type="button"
               onClick={onClose}

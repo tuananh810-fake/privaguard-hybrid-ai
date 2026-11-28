@@ -1,9 +1,11 @@
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Code2,
   Columns2,
+  Copy,
   Cpu,
+  Download,
   FileText,
   Image as ImageIcon,
   Paperclip,
@@ -17,7 +19,13 @@ import {
 import { SAMPLE_DOCUMENTS } from '../data/samples';
 import { AnalysisTask, AttachedImage, ModeKey, NanoAvailability } from '../services/hybridAI';
 import { RedactionResult, VaultEntry } from '../services/piiVault';
+import type { SafeDocumentExportFormat } from '../services/fileRedactor';
 import { HighlightedRedactedText } from './RichOutput';
+import { ExportMenuButton, ExportMenuOption } from './ExportMenuButton';
+
+const PdfPreviewPane = lazy(() =>
+  import('./PdfPreviewPane').then((m) => ({ default: m.PdfPreviewPane }))
+);
 
 export const TASK_OPTIONS: { key: AnalysisTask; label: string }[] = [
   { key: 'risk_audit', label: 'Security audit' },
@@ -32,7 +40,7 @@ const QUICK_MODE_OPTIONS: { key: ModeKey; label: string; title: string }[] = [
   { key: 'ONLY_ON_DEVICE', label: 'Strict Offline', title: '100% on-device Gemini Nano (0 B to cloud)' },
 ];
 
-export type InputTabKey = 'original' | 'safe' | 'diff' | 'audit';
+export type InputTabKey = 'original' | 'safe' | 'pages' | 'diff' | 'audit';
 
 interface DocumentInputPanelProps {
   rawText: string;
@@ -44,12 +52,19 @@ interface DocumentInputPanelProps {
   extractingFile: boolean;
   fileMeta: string | null;
   onClearFileMeta: () => void;
+  originalFile?: File | null;
+  exportingSafeFile?: boolean;
+  onExportSafeDocument?: (format: SafeDocumentExportFormat) => void;
   inputTab: InputTabKey;
   onInputTabChange: (tab: InputTabKey) => void;
   redaction: RedactionResult;
   vaultLookup: Record<string, VaultEntry>;
   leakCheck: number;
   outgoingPrompt: string;
+  smartContextGuard: boolean;
+  onToggleSmartContextGuard: () => void;
+  contextGuardSummary: string;
+  keptSafeCount: number;
   manualTerms: string[];
   onAddManualTerm: (term: string) => void;
   onRemoveManualTerm: (term: string) => void;
@@ -128,12 +143,19 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     extractingFile,
     fileMeta,
     onClearFileMeta,
+    originalFile = null,
+    exportingSafeFile = false,
+    onExportSafeDocument,
     inputTab,
     onInputTabChange,
     redaction,
     vaultLookup,
     leakCheck,
     outgoingPrompt,
+    smartContextGuard,
+    onToggleSmartContextGuard,
+    contextGuardSummary,
+    keptSafeCount,
     manualTerms,
     onAddManualTerm,
     onRemoveManualTerm,
@@ -173,6 +195,79 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     const [isDragging, setIsDragging] = useState(false);
     const [loadingSample, setLoadingSample] = useState<'pdf' | 'image' | null>(null);
     const [selectedText, setSelectedText] = useState('');
+    const [safeCopied, setSafeCopied] = useState(false);
+
+    async function handleCopySafeText() {
+      if (!redaction.redactedText) return;
+      try {
+        await navigator.clipboard.writeText(redaction.redactedText);
+        setSafeCopied(true);
+        setTimeout(() => setSafeCopied(false), 1800);
+      } catch {
+        // ignore clipboard permission errors
+      }
+    }
+
+    function handleDownloadSafeTxt() {
+      if (!redaction.redactedText) return;
+      const blob = new Blob([redaction.redactedText], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `privaguard-safe-${Date.now()}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    const originalFileName = originalFile?.name ?? null;
+    const isPdfLoaded = Boolean(
+      originalFile &&
+        (originalFile.name.toLowerCase().endsWith('.pdf') || originalFile.type === 'application/pdf')
+    );
+
+    const safeDocExportOptions = useMemo<ExportMenuOption[]>(() => {
+      const ext = originalFileName?.split('.').pop()?.toLowerCase();
+      const opts: ExportMenuOption[] = [];
+      if (originalFileName && ext) {
+        opts.push({
+          id: 'original',
+          label: `Keep original (.${ext})`,
+          hint:
+            ext === 'pdf'
+              ? 'Visual redacted PDF · 0 hidden text'
+              : ext === 'docx'
+                ? 'Preserve Word layout · metadata scrubbed'
+                : `Format-preserved safe-${originalFileName}`,
+          highlight: true,
+        });
+      }
+      opts.push(
+        { id: 'pdf', label: 'Export as .pdf', hint: 'Clean redacted PDF (metadata stripped)' },
+        { id: 'docx', label: 'Export as .docx', hint: 'Editable Word document (safe tokens)' },
+        { id: 'md', label: 'Export as .md', hint: 'Sanitized Markdown text' },
+        { id: 'txt', label: 'Export as .txt', hint: 'Plain sanitized text for any AI' },
+        { id: 'json', label: 'Export as .json', hint: 'Syntax-safe sanitized JSON' }
+      );
+      return opts;
+    }, [originalFileName]);
+
+    function handleSelectSafeDocExport(formatId: string) {
+      if (onExportSafeDocument) {
+        onExportSafeDocument(formatId as SafeDocumentExportFormat);
+      } else {
+        handleDownloadSafeTxt();
+      }
+    }
+
+    function handleDownloadRedactedImage() {
+      if (!attachedImage?.previewUrl) return;
+      const baseName = attachedImage.name.replace(/\.[^.]+$/, '') || 'image';
+      const ext = attachedImage.mimeType === 'image/png' ? 'png' : attachedImage.mimeType === 'image/jpeg' ? 'jpg' : 'webp';
+      const a = document.createElement('a');
+      a.href = attachedImage.previewUrl;
+      a.download = `privaguard-redacted-${baseName}.${ext}`;
+      a.click();
+    }
 
     const activeManualTerms = useMemo(() => {
       if (manualTerms.length === 0 || !rawText) return [];
@@ -389,6 +484,21 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               <ShieldCheck className="h-3.5 w-3.5" />
               Safe preview ({redaction.vault.length})
             </button>
+            {isPdfLoaded && (
+              <button
+                type="button"
+                onClick={() => onInputTabChange('pages')}
+                title="Preview original PDF pages with exact redaction boxes"
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
+                  inputTab === 'pages'
+                    ? 'bg-[var(--n-surface)] text-[var(--n-text)]'
+                    : 'text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]'
+                }`}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Pages
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-1 text-[12px]">
@@ -423,8 +533,30 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
 
         {/* Honest detection scope note */}
         <p className="mb-2 shrink-0 text-[11.5px] text-[var(--n-muted)]">
-          Regex + on-device Nano + manual marks · review Diff before sending.
+          Regex + Context Guard + on-device Nano + manual marks · review Diff before sending.
         </p>
+
+        {/* Smart Context Guard banner (shown when educational/sample items are preserved or overridden) */}
+        {(keptSafeCount > 0 || !smartContextGuard) && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--n-accent-border)] bg-[var(--n-accent-soft)] px-2.5 py-1.5 text-[12px] text-[var(--n-text)]"
+          >
+            <span className="min-w-0">
+              {smartContextGuard
+                ? `Smart Context Guard · ${contextGuardSummary}`
+                : 'Strict masking active · all patterns (including lab/sample items) are masked'}
+            </span>
+            <button
+              type="button"
+              onClick={onToggleSmartContextGuard}
+              className="shrink-0 rounded px-2 py-0.5 text-[11.5px] font-medium text-[var(--n-accent)] transition hover:bg-[var(--n-bg)]"
+            >
+              {smartContextGuard ? 'Mask all anyway' : 'Enable smart guard'}
+            </button>
+          </div>
+        )}
 
         {/* Local Extraction Status / Meta Line */}
         {extractingFile && (
@@ -443,14 +575,25 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--n-accent)]" />
               <span className="truncate">{fileMeta}</span>
             </span>
-            <button
-              type="button"
-              onClick={onClearFileMeta}
-              aria-label="Dismiss file info"
-              className="shrink-0 rounded p-0.5 hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
-            >
-              <X className="h-3 w-3" />
-            </button>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <ExportMenuButton
+                label="Export safe"
+                options={safeDocExportOptions}
+                busy={exportingSafeFile}
+                size="xs"
+                align="right"
+                title="Choose output format for your sanitized file"
+                onSelect={handleSelectSafeDocExport}
+              />
+              <button
+                type="button"
+                onClick={onClearFileMeta}
+                aria-label="Dismiss file info"
+                className="shrink-0 rounded p-0.5 hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
           </div>
         )}
 
@@ -616,10 +759,51 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
             </div>
           ) : inputTab === 'safe' ? (
             <div className="min-h-0 flex-1 overflow-y-auto py-2 pb-4 text-[14.5px] leading-[1.65] text-[var(--n-text)]">
-              <p className="mb-3 text-[12.5px] text-[var(--n-muted)]">
-                This is the safe version sent to AI. Click any highlighted tag to peek the original value locally.
-              </p>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[12.5px] text-[var(--n-muted)]">
+                  Safe version ready for any AI. Click any highlighted tag to peek locally.
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <ExportMenuButton
+                    label="Export safe"
+                    options={safeDocExportOptions}
+                    busy={exportingSafeFile}
+                    disabled={!redaction.redactedText}
+                    size="xs"
+                    align="right"
+                    title="Export sanitized document as original format, .pdf, .docx, .md, .txt, or .json"
+                    onSelect={handleSelectSafeDocExport}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCopySafeText}
+                    disabled={!redaction.redactedText}
+                    title="Copy masked safe text to paste into ChatGPT, Gemini, or Claude"
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-1 text-[11.5px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] disabled:opacity-40"
+                  >
+                    {safeCopied ? (
+                      <CheckCircle2 className="h-3 w-3 text-[var(--n-accent)]" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                    {safeCopied ? 'Copied' : 'Copy safe text'}
+                  </button>
+                </div>
+              </div>
               <HighlightedRedactedText text={redaction.redactedText} vaultLookup={vaultLookup} />
+            </div>
+          ) : inputTab === 'pages' && originalFile && isPdfLoaded ? (
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <Suspense
+                fallback={
+                  <div className="flex min-h-[180px] items-center justify-center gap-2 text-[13px] text-[var(--n-muted)]">
+                    <RefreshCw className="h-4 w-4 animate-spin text-[var(--n-accent)]" />
+                    Loading PDF preview…
+                  </div>
+                }
+              >
+                <PdfPreviewPane file={originalFile} vault={redaction.vault} />
+              </Suspense>
             </div>
           ) : inputTab === 'diff' ? (
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto py-1.5 sm:grid-cols-2 sm:overflow-hidden">
@@ -685,6 +869,17 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
+                {imageMaskCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDownloadRedactedImage}
+                    title="Download redacted image to upload to any AI tool"
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-2 py-1 text-[12px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)]"
+                  >
+                    <Download className="h-3 w-3" />
+                    Save image
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={onOpenImageRedactor}

@@ -7,7 +7,6 @@ import {
   Cloud,
   Copy,
   Cpu,
-  Download,
   Eye,
   EyeOff,
   FileWarning,
@@ -27,6 +26,16 @@ import {
 } from '../services/hybridAI';
 import { rehydrateLocally, SourceCounts, VaultEntry } from '../services/piiVault';
 import { HighlightedRedactedText, RichOutput } from './RichOutput';
+import { ExportMenuButton, ExportMenuOption } from './ExportMenuButton';
+import type { ReportExportFormat } from '../services/reportExporter';
+
+const REPORT_EXPORT_OPTIONS: ExportMenuOption[] = [
+  { id: 'pdf', label: 'Export as .pdf', hint: 'Clean paginated PDF report (metadata stripped)', highlight: true },
+  { id: 'docx', label: 'Export as .docx', hint: 'Editable Microsoft Word document' },
+  { id: 'md', label: 'Export as .md', hint: 'Markdown with SHA-256 verification proof' },
+  { id: 'json', label: 'Export as .json', hint: 'Structured audit & privacy telemetry' },
+  { id: 'txt', label: 'Export as .txt', hint: 'Plain text without Markdown symbols' },
+];
 
 export interface RunMetrics {
   sourceCounts: SourceCounts;
@@ -57,7 +66,9 @@ interface AnalysisOutputPanelProps {
   onSaveToFirestore: () => void;
   copied: boolean;
   onCopyReport: () => void;
-  onExportMarkdown: () => void;
+  exportingReport?: boolean;
+  onExportReport: (format: ReportExportFormat) => void;
+  onRetryPrimaryModel?: () => void;
   onQuickStart: () => void;
   onSwitchToFastCloud: () => void;
   followUps: FollowUpMessage[];
@@ -280,7 +291,9 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
     onSaveToFirestore,
     copied,
     onCopyReport,
-    onExportMarkdown,
+    exportingReport = false,
+    onExportReport,
+    onRetryPrimaryModel,
     onQuickStart,
     onSwitchToFastCloud,
     followUps,
@@ -290,7 +303,8 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
   }) => {
     const [question, setQuestion] = useState('');
     const isNanoUnavailable = Boolean(result?.nanoUnavailable || result?.wasMockEcho);
-    const effectiveRehydrate = rehydrate && !isHistoricalView && !isNanoUnavailable;
+    const hasVaultItems = vault.length > 0;
+    const effectiveRehydrate = rehydrate && hasVaultItems && !isHistoricalView && !isNanoUnavailable;
     const effectiveVaultLookup = isHistoricalView || isNanoUnavailable ? undefined : vaultLookup;
 
     const riskBanner = useMemo(
@@ -338,9 +352,29 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                 </span>
               )}
               {!isNanoUnavailable && result.fallbackUsed && (
-                <span className="rounded bg-[var(--n-warn-soft)] px-1.5 py-0.5 text-[var(--n-warn)]">
-                  Lite fallback
-                </span>
+                <div className="inline-flex items-center gap-1.5">
+                  <span
+                    title={
+                      result.fallbackReason === 'ttft_timeout'
+                        ? 'Primary model exceeded 12s first-token timeout — automatically switched to fast Lite model'
+                        : result.fallbackReason === 'cooldown_bypass'
+                          ? 'Primary model cooling down after a recent rate limit/timeout'
+                          : 'Primary model hit rate limit (429) — automatically switched to fast Lite model'
+                    }
+                    className="rounded bg-[var(--n-warn-soft)] px-1.5 py-0.5 text-[var(--n-warn)]"
+                  >
+                    Lite fallback
+                  </span>
+                  {onRetryPrimaryModel && !running && (
+                    <button
+                      type="button"
+                      onClick={onRetryPrimaryModel}
+                      className="rounded px-1.5 py-0.5 text-[11.5px] font-medium text-[var(--n-accent)] transition hover:bg-[var(--n-hover)]"
+                    >
+                      Retry 3.6 Flash
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -579,13 +613,15 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
               <button
                 type="button"
                 onClick={onToggleRehydrate}
-                disabled={isHistoricalView}
+                disabled={isHistoricalView || !hasVaultItems}
                 title={
                   isHistoricalView
                     ? 'Original secrets were never saved to Firestore (RAM-only vault)'
-                    : effectiveRehydrate
-                      ? 'Hide real values locally'
-                      : 'Restore real values locally from RAM vault'
+                    : !hasVaultItems
+                      ? 'No masked secrets in this document to reveal'
+                      : effectiveRehydrate
+                        ? 'Hide real values locally'
+                        : 'Restore real values locally from RAM vault'
                 }
                 className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition disabled:cursor-not-allowed disabled:opacity-45 ${
                   effectiveRehydrate
@@ -621,14 +657,14 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                 {copied ? 'Copied' : 'Copy'}
               </button>
 
-              <button
-                type="button"
-                onClick={onExportMarkdown}
-                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Export
-              </button>
+              <ExportMenuButton
+                label="Export"
+                options={REPORT_EXPORT_OPTIONS}
+                busy={exportingReport}
+                align="left"
+                title="Choose report export format (.pdf, .docx, .md, .json, .txt)"
+                onSelect={(fmt) => onExportReport(fmt as ReportExportFormat)}
+              />
             </div>
 
             {/* Slim Notion AI Follow-up Bar */}

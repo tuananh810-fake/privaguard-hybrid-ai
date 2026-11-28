@@ -124,6 +124,9 @@ export async function ensureAnonymousUid(): Promise<string | null> {
           msg.includes('operation-not-allowed')
         ) {
           anonymousAuthDisabled = true;
+        } else {
+          // Allow clean retry when browser reconnects after a transient offline start
+          authPromise = null;
         }
         return null;
       }
