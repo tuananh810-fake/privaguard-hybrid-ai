@@ -53,7 +53,7 @@ Review what is detected before anything leaves your browser:
 - **`Safe` tab:** Preview the anonymized text with color-coded placeholder chips (`[SECRET_1]`, `[EMAIL_1]`, `[PERSON_1]`, etc.). Click any chip to peek at the original value locally.
 - **`Diff` tab:** Compare the original document and masked output side-by-side, showing the detection source for every token (`regex`, `Nano`, or `manual`).
 - **`Payload` tab:** Inspect the exact sanitized text payload that will be transmitted (`0 detected PII included`).
-- **Pre-send Semantic Scan (Nano):** In **`Diff`** or **`Payload`**, click **`Scan semantic PII (Nano)`** to run local Gemini Nano entity discovery *before* calling the cloud (**20 s** timeout for manual scans; **12 s** for automatic pre-analysis scans; **5 s** for follow-ups).
+- **Pre-send Semantic Scan (Nano):** In **`Diff`** or **`Payload`**, click **`Scan semantic PII (Nano)`** to run local Gemini Nano entity discovery *before* calling the cloud (**30 s** timeout for manual scans; **12 s** for automatic pre-analysis scans; **5 s** for follow-ups).
   - Click **`Cancel`** anytime while scanning to abort immediately.
   - If Nano exceeds the timeout budget, the status bar reports an honest notice (`Nano timed out (Ns) · retry scan or mark names manually` or `kept N partial entities`) rather than silently claiming zero entities, and does not cache the incomplete scan.
   - If a document exceeds the first ~5,160 characters (3 Nano chunks), the notice explicitly reports the scanned range so you can mark later names manually.
@@ -126,7 +126,7 @@ Additional controls in the Tech Drawer:
 ## 7. Troubleshooting
 
 - **"Gemini Nano unavailable":** Verify you are using Chrome Desktop with both flags in [Section 2](#2-enabling-on-device-gemini-nano-chrome-built-in-ai) enabled, and allow Chrome a few minutes to finish downloading the on-device model. Regex + manual masking + Cloud Gemini continue working normally in the meantime.
-- **"Nano timed out (Ns)":** The first Nano invocation after browser launch can take several seconds to warm up. Click **`Scan semantic PII (Nano)`** again to retry (20 s budget), click **`Cancel`** if you want to stop early, or highlight names manually with `Ctrl/Cmd + Shift + M`.
+- **"Nano timed out (Ns)":** The first Nano invocation after browser launch can take several seconds to warm up. Click **`Scan semantic PII (Nano)`** again to retry (30 s budget), click **`Cancel`** if you want to stop early, or highlight names manually with `Ctrl/Cmd + Shift + M`.
 - **"Saved history is paused" / App Check verification:** Indicates Firebase Anonymous Sign-in, App Check (reCAPTCHA Enterprise), or Firestore rules declined the save request. Core local masking, AI analysis, and viewing existing read-only reports in the top-bar **`History`** slide-over drawer continue working without interruption.
 - **Long documents (> 5,160 chars):** Regex still scans the entire document, while on-device Nano scans the first 3 chunks (~5,160 chars) to stay responsive. Review the Diff view and highlight any later free-form names with `Ctrl/Cmd + Shift + M`.
-- **Stale cached app version:** Because PrivaGuard is an offline-capable PWA, hard-refresh once after updates so the latest Service Worker (`privaguard-shell-v6.3.0`) activates cleanly.
+- **Stale cached app version:** Because PrivaGuard is an offline-capable PWA, hard-refresh once after updates so the latest Service Worker (`privaguard-shell-v6.3.2`) activates cleanly.
