@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useEffect } from 'react';
 import { Cpu, KeyRound, Lock, RefreshCw, Shield, WifiOff, X } from 'lucide-react';
 import { RemoteSettings } from '../firebase';
 import { HybridResponse, ModeKey, NanoAvailability } from '../services/hybridAI';
@@ -61,6 +61,14 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
     lastResult,
     onClose,
   }) => {
+    useEffect(() => {
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') onClose();
+      };
+      window.addEventListener('keydown', onKeyDown);
+      return () => window.removeEventListener('keydown', onKeyDown);
+    }, [onClose]);
+
     return (
       <div
         role="dialog"
@@ -163,6 +171,7 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
                 </label>
                 <input
                   id="custom-terms"
+                  name="customTerms"
                   type="text"
                   value={customTerms}
                   onChange={(e) => onCustomTermsChange(e.target.value)}
@@ -186,6 +195,7 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
                 </label>
                 <select
                   id="inference-mode"
+                  name="inferenceMode"
                   value={mode}
                   onChange={(e) => onModeChange(e.target.value as ModeKey)}
                   className="w-full rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-3 py-1.5 text-[13px] text-[var(--n-text)] focus:border-[var(--n-accent)] focus:outline-none"
@@ -198,7 +208,10 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
                 </select>
               </div>
 
-              <label className="flex cursor-pointer items-center justify-between rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-2.5">
+              <label
+                htmlFor="simulate-offline"
+                className="flex cursor-pointer items-center justify-between rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-2.5"
+              >
                 <div className="flex items-center gap-2">
                   <WifiOff className="h-3.5 w-3.5 text-[var(--n-muted)]" />
                   <div>
@@ -211,6 +224,8 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
                   </div>
                 </div>
                 <input
+                  id="simulate-offline"
+                  name="simulateOffline"
                   type="checkbox"
                   checked={simulatedOffline}
                   onChange={onToggleSimulatedOffline}

@@ -3,9 +3,14 @@ import { ai } from '../firebase';
 import {
   AnalysisTask,
   buildTaskPrompt,
+  CLOUD_TTFT_TIMEOUT_MS,
   extractRiskBanner,
+  markCloudModelStalled,
   ParsedRiskBanner,
   parseStructuredAudit,
+  resolveEffectiveCloudModel,
+  shouldApplyCloudTtftTimeout,
+  shouldEmitStreamChunk,
   StructuredAuditReport,
   StructuredFinding,
   StructuredRemediation,
@@ -53,8 +58,12 @@ export interface FollowUpMessage {
 }
 
 const FALLBACK_CLOUD_MODEL = 'gemini-3.5-flash-lite';
+const NANO_OUTPUT_LANG_OPTIONS = {
+  expectedOutputs: [{ type: 'text' as const, languages: ['en'] }],
+};
 const MAX_CACHE_ENTRIES = 24;
 const responseCache = new Map<string, HybridResponse>();
+const stalledCloudModels = new Map<string, number>();
 
 const SECURITY_AUDIT_SCHEMA = Schema.object({
   properties: {
@@ -105,7 +114,7 @@ function makeCacheKey(
 function getSystemInstruction(style = 'concise_executive'): string {
   const base =
     'You are PrivaGuard AI, a privacy-first security & document intelligence analyst. ' +
-    'ALWAYS preserve bracketed privacy tokens (such as [SECRET_1], [EMAIL_1], [PERSON_1], [CARD_1], [ID_1], [PHONE_1], [IP_1]) verbatim. ' +
+    'ALWAYS preserve bracketed privacy tokens (such as [SECRET_1], [EMAIL_1], [PERSON_1], [ORG_1], [ADDRESS_1], [CARD_1], [ID_1], [PHONE_1], [IP_1]) verbatim. ' +
     'Never attempt to guess, decode, or alter placeholders.';
 
   if (style === 'detailed_auditor') {
@@ -134,11 +143,17 @@ export function toInferenceMode(key: ModeKey): InferenceMode {
 export async function checkChromeNanoAvailability(): Promise<NanoAvailability> {
   try {
     const g = globalThis as unknown as {
-      LanguageModel?: { availability?: () => Promise<string> };
+      LanguageModel?: { availability?: (opts?: unknown) => Promise<string> };
       ai?: { languageModel?: { capabilities?: () => Promise<{ available: string }> } };
     };
     if (g.LanguageModel?.availability) {
-      const status = (await g.LanguageModel.availability()).toLowerCase();
+      let rawStatus: string;
+      try {
+        rawStatus = await g.LanguageModel.availability(NANO_OUTPUT_LANG_OPTIONS);
+      } catch {
+        rawStatus = await g.LanguageModel.availability();
+      }
+      const status = rawStatus.toLowerCase();
       if (status === 'available' || status === 'readily') return 'available';
       if (status === 'downloading') return 'downloading';
       if (status === 'downloadable' || status === 'after-download') return 'downloadable';
@@ -172,21 +187,83 @@ function isRateLimitOrTransientError(err: unknown): boolean {
     msg.includes('overloaded') ||
     msg.includes('404') ||
     msg.includes('not found') ||
-    msg.includes('not supported')
+    msg.includes('not supported') ||
+    msg.includes('cloud_ttft_timeout') ||
+    msg.includes('timed out')
   );
+}
+
+function isOnDeviceInputTooLargeError(err: unknown): boolean {
+  const name = err instanceof DOMException ? err.name : '';
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return name === 'QuotaExceededError' || msg.includes('input is too large') || msg.includes('quotaexceeded');
 }
 
 function buildOnDeviceParams(systemInstruction: string): OnDeviceParams {
   return {
     createOptions: {
+      expectedOutputs: [{ type: 'text', languages: ['en'] }],
       initialPrompts: [
         {
           role: 'system',
           content: [{ type: 'text', value: systemInstruction }],
         },
       ],
-    },
+    } as OnDeviceParams['createOptions'],
   };
+}
+
+function raceWithAbort<T>(promise: Promise<T>, signal?: AbortSignal, timeoutMs?: number): Promise<T> {
+  if (!signal && !timeoutMs) return promise;
+  if (signal?.aborted) {
+    promise.catch(() => {});
+    return Promise.reject(new DOMException('Analysis cancelled by user.', 'AbortError'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const cleanup = () => {
+      if (timer !== null) clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException('Analysis cancelled by user.', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (timeoutMs && timeoutMs > 0) {
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`CLOUD_TTFT_TIMEOUT: Cloud model did not respond within ${Math.round(timeoutMs / 1000)}s`));
+      }, timeoutMs);
+    }
+    promise.then(
+      (val) => {
+        cleanup();
+        resolve(val);
+      },
+      (err) => {
+        cleanup();
+        reject(err);
+      }
+    );
+  });
+}
+
+function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException('Analysis cancelled by user.', 'AbortError'));
+  }
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Analysis cancelled by user.', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 async function runSingleStream(
@@ -196,6 +273,7 @@ async function runSingleStream(
   systemPromptStyle: string,
   started: number,
   useStructuredAudit: boolean,
+  nanoAvailable: boolean,
   onChunk?: (partialText: string) => void,
   signal?: AbortSignal
 ): Promise<HybridResponse> {
@@ -219,18 +297,35 @@ async function runSingleStream(
     },
   });
 
+  const primaryCloudTimeoutMs = shouldApplyCloudTtftTimeout(
+    modeKey,
+    cloudModel,
+    FALLBACK_CLOUD_MODEL,
+    nanoAvailable
+  )
+    ? CLOUD_TTFT_TIMEOUT_MS
+    : undefined;
+
   try {
-    const streamResult = await model.generateContentStream(parts);
+    const streamResult = await raceWithAbort(
+      model.generateContentStream(parts),
+      signal,
+      primaryCloudTimeoutMs
+    );
     let accumulated = '';
-    for await (const chunk of streamResult.stream) {
-      if (signal?.aborted) {
-        throw new DOMException('Analysis cancelled by user.', 'AbortError');
-      }
-      const chunkText = chunk.text();
+    const iterator = streamResult.stream[Symbol.asyncIterator]();
+    while (true) {
+      const remainingTtftMs =
+        ttftMs === 0 && primaryCloudTimeoutMs
+          ? Math.max(500, primaryCloudTimeoutMs - (performance.now() - started))
+          : undefined;
+      const next = await raceWithAbort(iterator.next(), signal, remainingTtftMs);
+      if (next.done) break;
+      const chunkText = next.value.text();
       if (chunkText) {
         if (ttftMs === 0) ttftMs = Math.round(performance.now() - started);
         accumulated += chunkText;
-        if (!useStructuredAudit) {
+        if (shouldEmitStreamChunk(accumulated, useStructuredAudit)) {
           onChunk?.(accumulated);
         }
       }
@@ -238,7 +333,7 @@ async function runSingleStream(
     if (signal?.aborted) {
       throw new DOMException('Analysis cancelled by user.', 'AbortError');
     }
-    const finalResp = (await streamResult.response) as unknown as {
+    const finalResp = (await raceWithAbort(streamResult.response, signal)) as unknown as {
       text: () => string;
       inferenceSource?: string;
     };
@@ -265,7 +360,7 @@ async function runSingleStream(
     if (signal?.aborted || (streamErr instanceof DOMException && streamErr.name === 'AbortError')) {
       throw streamErr;
     }
-    if (isRateLimitOrTransientError(streamErr)) {
+    if (isRateLimitOrTransientError(streamErr) || isOnDeviceInputTooLargeError(streamErr)) {
       throw streamErr;
     }
     const fallbackModel = getGenerativeModel(ai, {
@@ -276,7 +371,7 @@ async function runSingleStream(
         systemInstruction,
       },
     });
-    const result = await fallbackModel.generateContent(parts);
+    const result = await raceWithAbort(fallbackModel.generateContent(parts), signal);
     if (signal?.aborted) {
       throw new DOMException('Analysis cancelled by user.', 'AbortError');
     }
@@ -310,7 +405,8 @@ export async function generateHybridStream(
   onChunk?: (partialText: string) => void,
   signal?: AbortSignal,
   systemPromptStyle = 'concise_executive',
-  useStructuredAudit = false
+  useStructuredAudit = false,
+  nanoAvailable = false
 ): Promise<HybridResponse> {
   const cacheKey = makeCacheKey(prompt, modeKey, cloudModel, systemPromptStyle, useStructuredAudit, image);
   const cached = responseCache.get(cacheKey);
@@ -320,8 +416,16 @@ export async function generateHybridStream(
   }
 
   const started = performance.now();
-  const parts: Array<string | Part> = [prompt];
-  if (image) {
+  const isStrictOffline = modeKey === 'ONLY_ON_DEVICE';
+  const effectivePrompt = isStrictOffline
+    ? `${prompt.slice(0, 3200)}${
+        image
+          ? `\n\n[Locally redacted image attached in RAM: ${image.name} — analyzed offline on text summary only]`
+          : ''
+      }`
+    : prompt;
+  const parts: Array<string | Part> = [effectivePrompt];
+  if (image && !isStrictOffline) {
     parts.push({
       type: 'inlineData',
       inlineData: {
@@ -331,36 +435,83 @@ export async function generateHybridStream(
     });
   }
 
+  const { model: activeCloudModel, bypassedToFallback } = resolveEffectiveCloudModel(
+    cloudModel,
+    FALLBACK_CLOUD_MODEL,
+    modeKey,
+    stalledCloudModels
+  );
+
+  const storeInCache = (entry: HybridResponse) => {
+    if (entry.wasMockEcho) return;
+    if (responseCache.size >= MAX_CACHE_ENTRIES) {
+      const firstKey = responseCache.keys().next().value;
+      if (firstKey) responseCache.delete(firstKey);
+    }
+    responseCache.set(cacheKey, entry);
+  };
+
   try {
     const res = await runSingleStream(
       parts,
       modeKey,
-      cloudModel,
+      activeCloudModel,
       systemPromptStyle,
       started,
       useStructuredAudit,
+      nanoAvailable,
       onChunk,
       signal
     );
-    if (!res.wasMockEcho) {
-      if (responseCache.size >= MAX_CACHE_ENTRIES) {
-        const firstKey = responseCache.keys().next().value;
-        if (firstKey) responseCache.delete(firstKey);
-      }
-      responseCache.set(cacheKey, res);
-    }
-    return res;
+    const finalRes =
+      bypassedToFallback && res.inferenceSource !== 'ON_DEVICE'
+        ? { ...res, fallbackUsed: true }
+        : res;
+    storeInCache(finalRes);
+    return finalRes;
   } catch (err) {
     if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
       throw err;
     }
+    if (isStrictOffline && isOnDeviceInputTooLargeError(err)) {
+      for (const maxLen of [1100, 550]) {
+        try {
+          const compactPrompt = `${prompt.slice(0, maxLen)}\n[Excerpted locally for on-device context limit]`;
+          const compactRes = await runSingleStream(
+            [compactPrompt],
+            modeKey,
+            activeCloudModel,
+            systemPromptStyle,
+            started,
+            false,
+            nanoAvailable,
+            onChunk,
+            signal
+          );
+          storeInCache(compactRes);
+          return compactRes;
+        } catch (retryErr) {
+          if (
+            signal?.aborted ||
+            (retryErr instanceof DOMException && retryErr.name === 'AbortError') ||
+            !isOnDeviceInputTooLargeError(retryErr)
+          ) {
+            throw retryErr;
+          }
+        }
+      }
+    }
     if (
       isRateLimitOrTransientError(err) &&
-      cloudModel !== FALLBACK_CLOUD_MODEL &&
+      activeCloudModel !== FALLBACK_CLOUD_MODEL &&
       modeKey !== 'ONLY_ON_DEVICE'
     ) {
-      await new Promise((r) => setTimeout(r, 600));
-      if (signal?.aborted) throw new DOMException('Analysis cancelled by user.', 'AbortError');
+      const isTimeout = err instanceof Error && err.message.includes('CLOUD_TTFT_TIMEOUT');
+      if (isTimeout) {
+        markCloudModelStalled(stalledCloudModels, activeCloudModel);
+      } else {
+        await sleepWithAbort(600, signal);
+      }
       const fallbackRes = await runSingleStream(
         parts,
         modeKey,
@@ -368,10 +519,13 @@ export async function generateHybridStream(
         systemPromptStyle,
         started,
         useStructuredAudit,
+        nanoAvailable,
         onChunk,
         signal
       );
-      return { ...fallbackRes, fallbackUsed: true };
+      const taggedFallback = { ...fallbackRes, fallbackUsed: true };
+      storeInCache(taggedFallback);
+      return taggedFallback;
     }
     if (isRateLimitOrTransientError(err)) {
       throw new Error(
@@ -391,7 +545,8 @@ export async function generateFollowUpStream(
   cloudModel = 'gemini-3.6-flash',
   systemPromptStyle = 'concise_executive',
   onChunk?: (partialText: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  nanoAvailable = false
 ): Promise<HybridResponse> {
   const transcript = history
     .slice(-6)
@@ -416,12 +571,18 @@ export async function generateFollowUpStream(
     onChunk,
     signal,
     systemPromptStyle,
-    false
+    false,
+    nanoAvailable
   );
 }
 
 export function createOnDeviceNanoModel() {
   return getGenerativeModel(ai, {
     mode: InferenceMode.ONLY_ON_DEVICE,
+    onDeviceParams: {
+      createOptions: {
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
+      } as OnDeviceParams['createOptions'],
+    },
   });
 }

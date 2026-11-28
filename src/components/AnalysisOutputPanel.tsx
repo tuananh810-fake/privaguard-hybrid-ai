@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -65,6 +65,12 @@ interface AnalysisOutputPanelProps {
   onSendFollowUp: (question: string) => void;
 }
 
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '0 ms';
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 function formatEngineLabel(result: HybridResponse): string {
   if (result.inferenceSource === 'ON_DEVICE') {
     return 'Ran on: Device (Nano)';
@@ -87,6 +93,9 @@ const StructuredAuditView: React.FC<{
   vaultLookup: Record<string, VaultEntry>;
 }> = memo(({ report, rehydrate, vault, vaultLookup }) => {
   const [checked, setChecked] = useState<Record<number, boolean>>({});
+  useEffect(() => {
+    setChecked({});
+  }, [report]);
   const completedCount = Object.values(checked).filter(Boolean).length;
   const format = (s: string) => (rehydrate ? rehydrateLocally(s, vault) : s);
 
@@ -149,9 +158,9 @@ const StructuredAuditView: React.FC<{
               key={idx}
               className="border-b border-[var(--n-border)] pb-3 last:border-b-0 last:pb-0"
             >
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <span className="text-[14.5px] font-medium text-[var(--n-text)]">
-                  {format(f.title)}
+              <div className="mb-1 flex items-start justify-between gap-2">
+                <span className="min-w-0 break-words text-[14.5px] font-medium text-[var(--n-text)]">
+                  <HighlightedRedactedText text={format(f.title)} vaultLookup={vaultLookup} inline />
                 </span>
                 <span
                   className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${SEVERITY_BADGE[f.severity]}`}
@@ -159,7 +168,7 @@ const StructuredAuditView: React.FC<{
                   {f.severity.charAt(0) + f.severity.slice(1).toLowerCase()}
                 </span>
               </div>
-              <div className="text-[14px] leading-[1.6] text-[var(--n-muted)]">
+              <div className="min-w-0 break-words text-[14px] leading-[1.6] text-[var(--n-muted)]">
                 <HighlightedRedactedText text={format(f.detail)} vaultLookup={vaultLookup} />
               </div>
             </div>
@@ -293,9 +302,9 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
     }
 
     return (
-      <section className="flex min-h-[calc(100vh-49px)] flex-col bg-[var(--n-bg)] px-6 py-7 sm:px-10">
+      <section className="flex min-h-[540px] min-w-0 flex-col bg-[var(--n-bg)] px-5 py-5 sm:px-7 lg:h-full lg:min-h-0 lg:overflow-hidden lg:px-8">
         {/* Clean Page Header */}
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+        <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2">
           <h2 className="text-[22px] font-bold tracking-tight text-[var(--n-text)]">Analysis</h2>
 
           {result && (
@@ -326,7 +335,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
         {result && isHistoricalView && (
           <div
             role="status"
-            className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3.5 py-2 text-[12.5px] text-[var(--n-muted)]"
+            className="mb-3 flex shrink-0 items-center gap-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3.5 py-2 text-[12.5px] text-[var(--n-muted)]"
           >
             <Lock className="h-3.5 w-3.5 shrink-0 text-[var(--n-accent)]" />
             <span className="font-medium text-[var(--n-text)]">
@@ -339,9 +348,9 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
         {result && runMetrics && !isHistoricalView && (
           <div
             aria-label="Hybrid run metrics"
-            className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3.5 py-2.5 text-[12px] sm:grid-cols-3 xl:grid-cols-6"
+            className="mb-4 grid shrink-0 grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3.5 py-2.5 text-[12px] sm:grid-cols-3 2xl:grid-cols-6"
           >
-            <div>
+            <div className="min-w-0">
               <div className="text-[11px] text-[var(--n-muted)]">Engine</div>
               <div className="truncate font-medium text-[var(--n-text)]">
                 {result.inferenceSource === 'ON_DEVICE'
@@ -349,19 +358,19 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                   : result.modelUsed.replace(/\s*\(Cloud\)\s*$/i, '').trim()}
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-[11px] text-[var(--n-muted)]">Latency</div>
               <div className="font-mono font-medium tabular-nums text-[var(--n-text)]">
-                {result.latencyMs} ms
+                {formatDuration(result.latencyMs)}
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-[11px] text-[var(--n-muted)]">TTFT</div>
               <div className="font-mono font-medium tabular-nums text-[var(--n-text)]">
-                {result.ttftMs} ms
+                {formatDuration(result.ttftMs)}
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-[11px] text-[var(--n-muted)]">Masked (rx/Na/man)</div>
               <div
                 title={`regex: ${runMetrics.sourceCounts.regex}, Nano: ${runMetrics.sourceCounts.nano}, manual: ${runMetrics.sourceCounts.manual} (local shield ${shieldTimeMs < 1 ? '<1ms' : `${shieldTimeMs}ms`})`}
@@ -375,13 +384,13 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                 </span>
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-[11px] text-[var(--n-muted)]">Bytes to cloud</div>
               <div className="font-mono font-medium tabular-nums text-[var(--n-text)]">
                 {runMetrics.bytesSentToCloud.toLocaleString()} B
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-[11px] text-[var(--n-muted)]">Raw PII bytes sent</div>
               <div
                 className={`font-mono font-medium tabular-nums ${
@@ -398,7 +407,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
         {errorMsg && (
           <div
             role="alert"
-            className="mb-4 rounded-lg border border-[var(--n-danger-border)] bg-[var(--n-danger-soft)] p-3.5 text-[13.5px] text-[var(--n-danger)]"
+            className="mb-3 shrink-0 rounded-lg border border-[var(--n-danger-border)] bg-[var(--n-danger-soft)] p-3.5 text-[13.5px] text-[var(--n-danger)]"
           >
             <div className="mb-1 flex items-center gap-1.5 font-semibold">
               <FileWarning className="h-4 w-4" />
@@ -410,16 +419,15 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
 
         {/* Mock Nano Notice */}
         {result?.wasMockEcho && (
-          <div className="mb-4 rounded-lg border border-[var(--n-warn-border)] bg-[var(--n-warn-soft)] p-3.5 text-[13px] text-[var(--n-warn)]">
-            Local Gemini Nano isn&apos;t downloaded in this browser yet. Open{' '}
-            <strong>Settings</strong> and choose <strong>Fast Cloud</strong> (or turn off Offline
-            mode) for live analysis.
+          <div className="mb-3 shrink-0 rounded-lg border border-[var(--n-warn-border)] bg-[var(--n-warn-soft)] p-3.5 text-[13px] text-[var(--n-warn)]">
+            Local Gemini Nano isn&apos;t downloaded in this browser yet. Choose{' '}
+            <strong>Fast Cloud</strong> in the Mode bar (or turn off Offline mode) for live analysis.
           </div>
         )}
 
         {/* Notion Callout for Markdown Risk Banner */}
         {riskBanner && (
-          <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-4 py-3 text-[14px]">
+          <div className="mb-3 flex shrink-0 items-start gap-2.5 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-4 py-3 text-[14px]">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--n-warn)]" />
             <div>
               <span className="font-semibold text-[var(--n-text)]">
@@ -433,7 +441,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
         )}
 
         {/* Main Editorial Reading Area */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-3">
           {result?.structuredAudit ? (
             <>
               <StructuredAuditView
@@ -479,20 +487,30 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
               </p>
             </div>
           ) : (
-            <div className="flex h-full min-h-[300px] flex-col items-center justify-center text-center">
-              <div className="mb-3.5 flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--n-surface)] text-[var(--n-accent)]">
+            <div className="flex h-full min-h-[300px] flex-col items-center justify-center px-4 text-center">
+              <div className="mb-3.5 flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--n-accent-soft)] text-[var(--n-accent)]">
                 <ShieldCheck className="h-5 w-5" />
               </div>
-              <p className="max-w-sm text-[15px] text-[var(--n-text)]">
-                Your private details stay on this device while AI summarizes or audits the safe version.
+              <h3 className="text-[16px] font-semibold tracking-tight text-[var(--n-text)]">
+                Private hybrid analysis
+              </h3>
+              <p className="mt-1.5 max-w-sm text-[13.5px] leading-relaxed text-[var(--n-muted)]">
+                Detected secrets stay in local RAM. AI only sees safe placeholders—click any token to peek.
               </p>
+              <ol className="mt-4 flex flex-wrap items-center justify-center gap-1.5 text-[11.5px] text-[var(--n-muted)]">
+                <li className="rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-0.5">1. Local mask</li>
+                <li aria-hidden="true">→</li>
+                <li className="rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-0.5">2. Safe AI</li>
+                <li aria-hidden="true">→</li>
+                <li className="rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-0.5">3. Local restore</li>
+              </ol>
               <button
                 type="button"
                 onClick={onQuickStart}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-3.5 py-1.5 text-[13.5px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)]"
+                className="mt-5 inline-flex items-center gap-1.5 rounded-md border border-[var(--n-accent-border)] bg-[var(--n-bg)] px-3.5 py-1.5 text-[13.5px] font-medium text-[var(--n-accent)] transition hover:bg-[var(--n-accent-soft)]"
               >
                 Analyze this sample
-                <ArrowRight className="h-3.5 w-3.5 text-[var(--n-muted)]" />
+                <ArrowRight className="h-3.5 w-3.5" />
               </button>
             </div>
           )}
@@ -500,7 +518,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
 
         {/* Quiet Ghost Action Bar + Notion AI Follow-up Input */}
         {result && (
-          <div className="mt-5 space-y-3 border-t border-[var(--n-border)] pt-4">
+          <div className="mt-4 shrink-0 space-y-3 border-t border-[var(--n-border)] pt-3">
             {savedNotice && (
               <div
                 aria-live="polite"
@@ -577,16 +595,19 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
               >
                 <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--n-muted)]" />
                 <input
+                  id="followup-question"
+                  name="followupQuestion"
+                  aria-label="Follow-up question"
                   type="text"
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
                   disabled={followUpRunning || isHistoricalView}
                   placeholder={
                     isHistoricalView
-                      ? 'Follow-up requires an active local session (run Analyze safely on a document)...'
+                      ? 'Read-only snapshot · Analyze a document to ask follow-ups'
                       : 'Ask a follow-up question (private details auto-hidden)...'
                   }
-                  className="flex-1 bg-transparent py-1 text-[13.5px] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none disabled:cursor-not-allowed"
+                  className="min-w-0 flex-1 bg-transparent py-1 text-[13.5px] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none disabled:cursor-not-allowed"
                 />
                 <button
                   type="submit"

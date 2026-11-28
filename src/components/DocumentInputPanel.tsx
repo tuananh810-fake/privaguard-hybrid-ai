@@ -15,7 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { SAMPLE_DOCUMENTS } from '../data/samples';
-import { AnalysisTask, AttachedImage, NanoAvailability } from '../services/hybridAI';
+import { AnalysisTask, AttachedImage, ModeKey, NanoAvailability } from '../services/hybridAI';
 import { RedactionResult, VaultEntry } from '../services/piiVault';
 import { HighlightedRedactedText } from './RichOutput';
 
@@ -24,6 +24,12 @@ export const TASK_OPTIONS: { key: AnalysisTask; label: string }[] = [
   { key: 'executive', label: 'Executive brief' },
   { key: 'action_plan', label: 'Action plan' },
   { key: 'quick_offline', label: 'Quick summary' },
+];
+
+const QUICK_MODE_OPTIONS: { key: ModeKey; label: string; title: string }[] = [
+  { key: 'PREFER_ON_DEVICE', label: 'Auto Hybrid', title: 'On-device Nano first, Cloud fallback' },
+  { key: 'PREFER_IN_CLOUD', label: 'Fast Cloud', title: 'Gemini Cloud JSON audit on masked tokens' },
+  { key: 'ONLY_ON_DEVICE', label: 'Strict Offline', title: '100% on-device Gemini Nano (0 B to cloud)' },
 ];
 
 export type InputTabKey = 'original' | 'safe' | 'diff' | 'audit';
@@ -51,7 +57,9 @@ interface DocumentInputPanelProps {
   scanningNano: boolean;
   nanoScanNotice: string | null;
   nanoScanTruncated: boolean;
+  nanoScanTimedOut: boolean;
   onScanNano: () => void;
+  onCancelNanoScan: () => void;
   onOpenNanoGuide: () => void;
   attachedImage: AttachedImage | null;
   imageMaskCount: number;
@@ -59,6 +67,9 @@ interface DocumentInputPanelProps {
   onRemoveImage: () => void;
   task: AnalysisTask;
   onTaskChange: (t: AnalysisTask) => void;
+  mode: ModeKey;
+  simulatedOffline: boolean;
+  onQuickModeChange: (m: ModeKey) => void;
   running: boolean;
   onRunPipeline: () => void;
   onStop: () => void;
@@ -73,14 +84,14 @@ const HighlightedRawPii: React.FC<{ rawText: string; vault: VaultEntry[] }> = me
     const parts = useMemo(() => {
       if (vault.length === 0) return [{ text: rawText, isPii: false }];
       const uniqueOriginals = Array.from(new Set(vault.map((v) => v.original)))
-        .filter((s) => s.length >= 3)
+        .filter((s) => s.length >= 2)
         .sort((a, b) => b.length - a.length);
       if (uniqueOriginals.length === 0) return [{ text: rawText, isPii: false }];
-      const regex = new RegExp(`(${uniqueOriginals.map(escapeRegExp).join('|')})`, 'g');
-      const set = new Set(uniqueOriginals);
+      const regex = new RegExp(`(${uniqueOriginals.map(escapeRegExp).join('|')})`, 'gi');
+      const lowerSet = new Set(uniqueOriginals.map((s) => s.toLowerCase()));
       return rawText.split(regex).map((chunk) => ({
         text: chunk,
-        isPii: set.has(chunk),
+        isPii: lowerSet.has(chunk.toLowerCase()),
       }));
     }, [rawText, vault]);
 
@@ -129,7 +140,9 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     scanningNano,
     nanoScanNotice,
     nanoScanTruncated,
+    nanoScanTimedOut,
     onScanNano,
+    onCancelNanoScan,
     onOpenNanoGuide,
     attachedImage,
     imageMaskCount,
@@ -137,10 +150,18 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     onRemoveImage,
     task,
     onTaskChange,
+    mode,
+    simulatedOffline,
+    onQuickModeChange,
     running,
     onRunPipeline,
     onStop,
   }) => {
+    const activeQuickMode: ModeKey = simulatedOffline
+      ? 'ONLY_ON_DEVICE'
+      : mode === 'ONLY_IN_CLOUD'
+        ? 'PREFER_IN_CLOUD'
+        : mode;
     const textFileRef = useRef<HTMLInputElement>(null);
     const imageFileRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -150,6 +171,12 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     const [isDragging, setIsDragging] = useState(false);
     const [loadingSample, setLoadingSample] = useState<'pdf' | 'image' | null>(null);
     const [selectedText, setSelectedText] = useState('');
+
+    const activeManualTerms = useMemo(() => {
+      if (manualTerms.length === 0 || !rawText) return [];
+      const lowerDoc = rawText.toLowerCase();
+      return manualTerms.filter((term) => lowerDoc.includes(term.toLowerCase()));
+    }, [manualTerms, rawText]);
 
     function syncSelection() {
       const el = textareaRef.current;
@@ -261,7 +288,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className="relative flex min-h-[calc(100vh-49px)] flex-col bg-[var(--n-bg)] px-6 py-7 sm:px-10 lg:border-r lg:border-[var(--n-border)]"
+        className="relative flex min-h-[540px] min-w-0 flex-col bg-[var(--n-bg)] px-5 py-5 sm:px-7 lg:h-full lg:min-h-0 lg:overflow-hidden lg:px-8 lg:border-r lg:border-[var(--n-border)]"
       >
         {/* Subtle Notion Drag & Drop Overlay */}
         {isDragging && (
@@ -276,11 +303,17 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
           </div>
         )}
 
-        {/* Notion Page Heading + Subtle Template Chips */}
-        <div className="mb-5">
-          <h2 className="text-[22px] font-bold tracking-tight text-[var(--n-text)]">Document</h2>
+        {/* Heading + trust badge, unified sample row */}
+        <div className="mb-3 shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <h2 className="text-[22px] font-bold tracking-tight text-[var(--n-text)]">Document</h2>
+            <span className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--n-accent)]">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {leakCheck === 0 ? '0 detected PII sent to cloud' : `${leakCheck} detected PII remaining`}
+            </span>
+          </div>
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[12px] text-[var(--n-muted)]">Try a sample:</span>
+            <span className="mr-0.5 text-[12px] text-[var(--n-muted)]">Try:</span>
             {SAMPLE_DOCUMENTS.map((s) => (
               <button
                 type="button"
@@ -294,44 +327,42 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                   .replace(' & Payout', '')}
               </button>
             ))}
-          </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px] text-[var(--n-muted)]">
+            <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-[var(--n-border)]" />
             <button
               type="button"
               onClick={() => handleLoadSampleFile('pdf')}
               disabled={extractingFile || loadingSample !== null}
               aria-label="Try sample NDA PDF processed locally"
               aria-busy={loadingSample === 'pdf'}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)] disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-md bg-[var(--n-surface)] px-2.5 py-1 text-[12px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)] disabled:opacity-50"
             >
               {loadingSample === 'pdf' ? (
                 <RefreshCw className="h-3 w-3 animate-spin" />
               ) : (
                 <FileText className="h-3 w-3" />
               )}
-              {loadingSample === 'pdf' ? 'Loading sample PDF…' : 'Try sample PDF'}
+              {loadingSample === 'pdf' ? 'Loading PDF…' : 'NDA PDF'}
             </button>
-            <span aria-hidden="true">·</span>
             <button
               type="button"
               onClick={() => handleLoadSampleFile('image')}
               disabled={extractingFile || loadingSample !== null}
               aria-label="Try sample ID card image for local OCR redaction"
               aria-busy={loadingSample === 'image'}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)] disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-md bg-[var(--n-surface)] px-2.5 py-1 text-[12px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)] disabled:opacity-50"
             >
               {loadingSample === 'image' ? (
                 <RefreshCw className="h-3 w-3 animate-spin" />
               ) : (
                 <ImageIcon className="h-3 w-3" />
               )}
-              {loadingSample === 'image' ? 'Loading sample image…' : 'Try sample image'}
+              {loadingSample === 'image' ? 'Loading image…' : 'ID image'}
             </button>
           </div>
         </div>
 
         {/* Clean 2-Tab Bar + Subtle Diff/Payload Inspector Icons */}
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--n-border)] pb-2">
+        <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--n-border)] pb-2">
           <div className="flex items-center gap-1">
             <button
               type="button"
@@ -385,23 +416,19 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               <Code2 className="h-3.5 w-3.5" />
               Payload
             </button>
-            <span className="ml-1 hidden items-center gap-1 text-[12px] text-[var(--n-accent)] sm:inline-flex">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              {leakCheck === 0 ? '0 detected PII sent to cloud' : `${leakCheck} detected PII remaining`}
-            </span>
           </div>
         </div>
 
         {/* Honest detection scope note */}
-        <p className="mb-2 text-[11.5px] text-[var(--n-muted)]">
-          Detection = regex + on-device Nano + your manual marks; review the Diff before sending.
+        <p className="mb-2 shrink-0 text-[11.5px] text-[var(--n-muted)]">
+          Regex + on-device Nano + manual marks · review Diff before sending.
         </p>
 
         {/* Local Extraction Status / Meta Line */}
         {extractingFile && (
           <div
             aria-live="polite"
-            className="mb-2 flex items-center gap-2 rounded-md bg-[var(--n-surface)] px-3 py-1.5 text-[12.5px] text-[var(--n-text)]"
+            className="mb-2 flex shrink-0 items-center gap-2 rounded-md bg-[var(--n-surface)] px-3 py-1.5 text-[12.5px] text-[var(--n-text)]"
           >
             <RefreshCw className="h-3.5 w-3.5 animate-spin text-[var(--n-accent)]" />
             Extracting locally…
@@ -409,8 +436,8 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
         )}
 
         {fileMeta && !extractingFile && (
-          <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-[var(--n-surface)] px-3 py-1.5 text-[12px] text-[var(--n-muted)]">
-            <span className="flex items-center gap-1.5 truncate">
+          <div className="mb-2 flex shrink-0 items-center justify-between gap-2 rounded-md bg-[var(--n-surface)] px-3 py-1.5 text-[12px] text-[var(--n-muted)]">
+            <span className="flex min-w-0 items-center gap-1.5 truncate">
               <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--n-accent)]" />
               <span className="truncate">{fileMeta}</span>
             </span>
@@ -418,7 +445,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               type="button"
               onClick={onClearFileMeta}
               aria-label="Dismiss file info"
-              className="rounded p-0.5 hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+              className="shrink-0 rounded p-0.5 hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
             >
               <X className="h-3 w-3" />
             </button>
@@ -426,31 +453,45 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
         )}
 
         {/* Clean Notion Editorial Surface */}
-        <div className="flex flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
           {(inputTab === 'diff' || inputTab === 'audit') && (
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2.5 py-1.5 text-[12px]">
+            <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2.5 py-1.5 text-[12px]">
               {nanoStatus === 'available' ? (
                 <>
-                  <button
-                    type="button"
-                    onClick={onScanNano}
-                    disabled={scanningNano || running || !rawText.trim()}
-                    aria-label="Scan semantic PII locally with Gemini Nano before sending"
-                    aria-busy={scanningNano}
-                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {scanningNano ? (
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin text-[var(--n-accent)]" />
-                    ) : (
-                      <Cpu className="h-3.5 w-3.5 text-[var(--n-accent)]" />
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={onScanNano}
+                      disabled={scanningNano || running || !rawText.trim()}
+                      aria-label="Scan semantic PII locally with Gemini Nano before sending"
+                      aria-busy={scanningNano}
+                      className="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--n-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {scanningNano ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-[var(--n-accent)]" />
+                      ) : (
+                        <Cpu className="h-3.5 w-3.5 text-[var(--n-accent)]" />
+                      )}
+                      {scanningNano ? 'Scanning with Nano…' : 'Scan semantic PII (Nano)'}
+                    </button>
+                    {scanningNano && (
+                      <button
+                        type="button"
+                        onClick={onCancelNanoScan}
+                        aria-label="Cancel Gemini Nano semantic scan"
+                        className="rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-[var(--n-danger)] transition hover:bg-[var(--n-danger-soft)]"
+                      >
+                        Cancel
+                      </button>
                     )}
-                    {scanningNano ? 'Scanning with Nano…' : 'Scan semantic PII (Nano)'}
-                  </button>
+                  </div>
                   <span
                     role="status"
                     aria-live="polite"
                     className={`text-[11.5px] ${
-                      nanoScanTruncated ? 'font-medium text-[var(--n-warn)]' : 'text-[var(--n-muted)]'
+                      nanoScanTruncated || nanoScanTimedOut
+                        ? 'font-medium text-[var(--n-warn)]'
+                        : 'text-[var(--n-muted)]'
                     }`}
                   >
                     {nanoScanNotice ?? 'Preview local Nano entity masks before cloud analysis'}
@@ -513,9 +554,9 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
           )}
 
           {inputTab === 'original' ? (
-            <div className="flex flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 flex-col">
               {selectedText && (
-                <div className="mb-1.5 flex items-center justify-between gap-2 rounded-md border border-[var(--n-accent-border)] bg-[var(--n-accent-soft)] px-2.5 py-1 text-[12px]">
+                <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2 rounded-md border border-[var(--n-accent-border)] bg-[var(--n-accent-soft)] px-2.5 py-1 text-[12px]">
                   <span className="truncate text-[var(--n-text)]">
                     Selected: <code className="font-mono">&ldquo;{selectedText}&rdquo;</code>
                   </span>
@@ -532,6 +573,9 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                 </div>
               )}
               <textarea
+                id="document-input"
+                name="documentInput"
+                aria-label="Document input"
                 ref={textareaRef}
                 value={rawText}
                 onChange={(e) => onRawTextChange(e.target.value)}
@@ -539,17 +583,17 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                 onKeyUp={syncSelection}
                 onMouseUp={syncSelection}
                 onKeyDown={handleTextareaKeyDown}
-                rows={13}
+                rows={7}
                 placeholder="Paste text or drop a PDF, Word (.docx), log file, or image here. Highlight any word and press Ctrl/Cmd+Shift+M to mark it sensitive..."
-                className="w-full flex-1 resize-none bg-transparent py-2 text-[14.5px] leading-[1.65] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none"
+                className="min-h-[140px] w-full flex-1 resize-none overflow-y-auto bg-transparent py-1.5 pb-3 text-[14.5px] leading-[1.65] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none"
               />
-              {manualTerms.length > 0 && (
+              {activeManualTerms.length > 0 && (
                 <div
-                  aria-label="Manually marked sensitive terms"
-                  className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-[var(--n-border)] pt-2 text-[11.5px]"
+                  aria-label="Manually marked sensitive terms active in this document"
+                  className="mt-1.5 flex shrink-0 flex-wrap items-center gap-1.5 border-t border-[var(--n-border)] pt-2 text-[11.5px]"
                 >
                   <span className="text-[var(--n-muted)]">Marked sensitive:</span>
-                  {manualTerms.map((term) => (
+                  {activeManualTerms.map((term) => (
                     <span
                       key={term}
                       className="inline-flex items-center gap-1 rounded border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-0.5 text-[var(--n-text)]"
@@ -569,53 +613,48 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               )}
             </div>
           ) : inputTab === 'safe' ? (
-            <div className="flex-1 overflow-y-auto py-2 text-[14.5px] leading-[1.65] text-[var(--n-text)]">
+            <div className="min-h-0 flex-1 overflow-y-auto py-2 pb-4 text-[14.5px] leading-[1.65] text-[var(--n-text)]">
               <p className="mb-3 text-[12.5px] text-[var(--n-muted)]">
                 This is the safe version sent to AI. Click any highlighted tag to peek the original value locally.
               </p>
               <HighlightedRedactedText text={redaction.redactedText} vaultLookup={vaultLookup} />
             </div>
           ) : inputTab === 'diff' ? (
-            <div className="grid flex-1 grid-cols-1 gap-4 py-2 sm:grid-cols-2">
-              <div className="overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 text-[13.5px] leading-relaxed">
-                <div className="mb-2 flex items-center justify-between text-[12px] font-medium text-[var(--n-muted)]">
-                  <span>On this device</span>
-                  <span className="font-mono tabular-nums text-[var(--n-danger)]">
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto py-1.5 sm:grid-cols-2 sm:overflow-hidden">
+              <div className="min-h-0 overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3 pb-4 text-[13.5px] leading-relaxed">
+                <div className="mb-2 flex items-center justify-between gap-2 text-[12px] font-medium text-[var(--n-muted)]">
+                  <span>Original</span>
+                  <span className="shrink-0 font-mono tabular-nums text-[var(--n-danger)]">
                     {redaction.bytesShielded}B private
                   </span>
                 </div>
                 <HighlightedRawPii rawText={rawText} vault={redaction.vault} />
               </div>
-              <div className="overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 text-[13.5px] leading-relaxed">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-1 text-[12px] font-medium text-[var(--n-muted)]">
-                  <span>
-                    Sent to AI{' '}
-                    <span className="font-mono text-[11px] font-normal">
-                      (regex {redaction.sourceCounts.regex} · Nano {redaction.sourceCounts.nano} · manual {redaction.sourceCounts.manual})
-                    </span>
-                  </span>
-                  <span className="font-mono tabular-nums text-[var(--n-accent)]">
-                    {leakCheck === 0 ? '0 detected PII sent to cloud' : `${leakCheck} remaining`}
+              <div className="min-h-0 overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3 pb-4 text-[13.5px] leading-relaxed">
+                <div className="mb-2 flex items-center justify-between gap-2 text-[12px] font-medium text-[var(--n-muted)]">
+                  <span>Safe payload</span>
+                  <span className="shrink-0 font-mono text-[11px] font-normal tabular-nums text-[var(--n-accent)]">
+                    rx {redaction.sourceCounts.regex} · Na {redaction.sourceCounts.nano} · man {redaction.sourceCounts.manual}
                   </span>
                 </div>
                 <HighlightedRedactedText text={redaction.redactedText} vaultLookup={vaultLookup} />
               </div>
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 font-mono text-[12px] leading-relaxed text-[var(--n-text)]">
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 pb-4 font-mono text-[12px] leading-relaxed text-[var(--n-text)]">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 font-sans text-[12px] font-medium text-[var(--n-muted)]">
                 <span>Exact network payload (0 detected PII included):</span>
                 <span className="rounded bg-[var(--n-bg)] px-2 py-0.5 text-[11px] text-[var(--n-text)]">
                   {redaction.sourceCounts.nano} {redaction.sourceCounts.nano === 1 ? 'entity' : 'entities'} found on-device by Gemini Nano
                 </span>
               </div>
-              <pre className="whitespace-pre-wrap">{outgoingPrompt}</pre>
+              <pre className="whitespace-pre-wrap break-words">{outgoingPrompt}</pre>
             </div>
           )}
 
           {/* Attached Image Strip */}
           {attachedImage && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-2 text-[13px]">
+            <div className="mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-2 text-[13px]">
               <div className="flex min-w-0 items-center gap-2.5">
                 <img
                   src={attachedImage.previewUrl}
@@ -654,10 +693,46 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
           )}
         </div>
 
-        {/* Quiet Bottom Action Toolbar */}
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5 border-t border-[var(--n-border)] pt-4">
-          <div className="flex items-center gap-2">
+        {/* Bottom Action Footer: 2 balanced rows (mode strip, action row) */}
+        <div className="mt-3 flex shrink-0 flex-col gap-2.5 border-t border-[var(--n-border)] pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="text-[12px] font-medium text-[var(--n-muted)]">Mode</span>
+            {/* Compact Notion-style Hybrid Mode Segmented Pill */}
+            <div
+              role="group"
+              aria-label="Hybrid inference mode"
+              className="inline-flex items-center rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] p-0.5"
+            >
+              {QUICK_MODE_OPTIONS.map((opt) => {
+                const isActive = activeQuickMode === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => onQuickModeChange(opt.key)}
+                    disabled={running}
+                    title={opt.title}
+                    aria-pressed={isActive}
+                    className={`whitespace-nowrap rounded-[4px] px-2 py-1 text-[11.5px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                      isActive
+                        ? 'bg-[var(--n-bg)] text-[var(--n-text)] shadow-2xs ring-1 ring-[var(--n-border)]'
+                        : 'text-[var(--n-muted)] hover:text-[var(--n-text)]'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            </div>
+            <span className="hidden text-[11.5px] text-[var(--n-muted)] sm:inline">Ctrl + Enter</span>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
             <input
+              id="attach-doc-file"
+              name="attachDocFile"
               ref={textFileRef}
               type="file"
               accept=".pdf,.docx,.txt,.md,.log,.json,.env,.csv"
@@ -665,6 +740,8 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               className="hidden"
             />
             <input
+              id="attach-img-file"
+              name="attachImgFile"
               ref={imageFileRef}
               type="file"
               accept="image/png,image/jpeg,image/webp"
@@ -718,6 +795,8 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
             </div>
 
             <select
+              id="analysis-goal"
+              name="analysisGoal"
               aria-label="Analysis goal"
               value={task}
               onChange={(e) => onTaskChange(e.target.value as AnalysisTask)}
@@ -729,9 +808,8 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                 </option>
               ))}
             </select>
-          </div>
-
-          <div className="flex items-center gap-2">
+            </div>
+          <div className="flex shrink-0 items-center gap-2">
             {running && (
               <button
                 type="button"
@@ -762,6 +840,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                 </>
               )}
             </button>
+          </div>
           </div>
         </div>
       </section>

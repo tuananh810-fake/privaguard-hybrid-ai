@@ -8,6 +8,7 @@ export interface NanoDiscoveredEntity {
 export interface NanoDiscoveryResult {
   entities: NanoDiscoveredEntity[];
   usedNano: boolean;
+  timedOut: boolean;
   latencyMs: number;
   scannedChars: number;
   totalChars: number;
@@ -17,6 +18,9 @@ export interface NanoDiscoveryResult {
 export const NANO_CHUNK_SIZE = 1800;
 export const NANO_CHUNK_OVERLAP = 120;
 export const NANO_MAX_CHUNKS = 3;
+export const NANO_MANUAL_SCAN_TIMEOUT_MS = 20_000;
+export const NANO_AUTO_SCAN_TIMEOUT_MS = 12_000;
+export const NANO_FOLLOWUP_SCAN_TIMEOUT_MS = 5_000;
 
 export interface NanoChunkSlice {
   text: string;
@@ -69,9 +73,30 @@ export function buildNanoChunkPlan(
 
 const VALID_TYPES = new Set<NanoEntityType>(['PERSON', 'ORG', 'ADDRESS', 'LOCATION']);
 
+function extractEntityObjectsFallback(raw: string): NanoDiscoveredEntity[] {
+  const results: NanoDiscoveredEntity[] = [];
+  const objPattern =
+    /\{\s*"text"\s*:\s*"((?:\\.|[^"\\])+)"\s*,\s*"type"\s*:\s*"(PERSON|ORG|ADDRESS|LOCATION)"\s*\}|\{\s*"type"\s*:\s*"(PERSON|ORG|ADDRESS|LOCATION)"\s*,\s*"text"\s*:\s*"((?:\\.|[^"\\])+)"\s*\}/gi;
+  let match: RegExpExecArray | null;
+  while ((match = objPattern.exec(raw)) !== null) {
+    const rawText = match[1] ?? match[4];
+    const rawType = (match[2] ?? match[3] ?? '').trim().toUpperCase() as NanoEntityType;
+    if (!rawText || !VALID_TYPES.has(rawType)) continue;
+    try {
+      const decoded = JSON.parse(`"${rawText}"`);
+      if (typeof decoded === 'string' && decoded.trim()) {
+        results.push({ text: decoded.trim(), type: rawType });
+      }
+    } catch {
+      results.push({ text: rawText.trim(), type: rawType });
+    }
+  }
+  return results;
+}
+
 /**
  * Safely parses JSON array output from Gemini Nano.
- * Handles markdown code fences or prose wrapping a JSON array; never throws.
+ * Handles markdown code fences, object wrappers, trailing commas, or truncated arrays; never throws.
  */
 export function parseNanoEntityResponse(rawOutput: string): NanoDiscoveredEntity[] {
   if (!rawOutput || typeof rawOutput !== 'string') return [];
@@ -84,15 +109,24 @@ export function parseNanoEntityResponse(rawOutput: string): NanoDiscoveredEntity
   if (!candidate.startsWith('[')) {
     const start = candidate.indexOf('[');
     const end = candidate.lastIndexOf(']');
-    if (start === -1 || end === -1 || end <= start) return [];
-    candidate = candidate.slice(start, end + 1);
+    if (start !== -1 && end > start) {
+      candidate = candidate.slice(start, end + 1);
+    } else {
+      return extractEntityObjectsFallback(candidate);
+    }
   }
 
   try {
-    const parsed = JSON.parse(candidate);
-    if (!Array.isArray(parsed)) return [];
+    const cleaned = candidate.replace(/,\s*([}\]])/g, '$1');
+    const parsed = JSON.parse(cleaned);
+    const list = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === 'object' && Array.isArray((parsed as { entities?: unknown }).entities)
+        ? (parsed as { entities: unknown[] }).entities
+        : null;
+    if (!list) return [];
     const results: NanoDiscoveredEntity[] = [];
-    for (const item of parsed) {
+    for (const item of list) {
       if (!item || typeof item !== 'object') continue;
       const obj = item as { text?: unknown; type?: unknown };
       if (typeof obj.text !== 'string' || typeof obj.type !== 'string') continue;
@@ -102,7 +136,7 @@ export function parseNanoEntityResponse(rawOutput: string): NanoDiscoveredEntity
     }
     return results;
   } catch {
-    return [];
+    return extractEntityObjectsFallback(candidate);
   }
 }
 
@@ -178,39 +212,35 @@ export function filterNanoEntities(
   return kept;
 }
 
-function buildDiscoveryPrompt(chunk: string): string {
+export function buildDiscoveryPrompt(chunk: string): string {
   return [
-    'You are a strict local PII extractor. Extract ONLY free-form sensitive entities that regex cannot catch:',
-    '- PERSON: full names or personal names (including Vietnamese names with diacritics like "Nguyễn Văn An")',
-    '- ORG: private company, client, hospital, or internal team names',
-    '- ADDRESS: street addresses, apartment/suite numbers, postal addresses',
-    '- LOCATION: specific private offices, clinics, or branch locations',
-    'Rules:',
-    '1. Return ONLY a JSON array of objects: [{"text": "exact substring", "type": "PERSON"|"ORG"|"ADDRESS"|"LOCATION"}]',
-    '2. Every "text" MUST be copied verbatim from the input text.',
-    '3. Do NOT include emails, phone numbers, IPs, URLs, API keys, dates, or generic words.',
-    '4. If none found, return [].',
-    '',
-    'Input text:',
+    'Extract sensitive PERSON, ORG, and ADDRESS substrings verbatim from the text (English and Vietnamese with diacritics).',
+    'Exclude emails, phones, IDs, IPs, URLs, keys, dates, and generic terms.',
+    'Return ONLY JSON: [{"text":"exact substring","type":"PERSON"|"ORG"|"ADDRESS"}] or [].',
+    'Text:',
     chunk,
   ].join('\n');
+}
+
+export interface DiscoverNanoOptions {
+  alreadyMaskedByRegex?: string[];
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  /** Optional chunk generator override for deterministic unit tests. */
+  generateChunkText?: (prompt: string) => Promise<string>;
 }
 
 /**
  * Runs on-device Gemini Nano (InferenceMode.ONLY_ON_DEVICE) to discover semantic PII
  * before anything is sent to the cloud. Dynamically imports firebase/ai to keep initial JS small.
- * Always enforces a 5s timeout and never throws on unavailable/invalid responses.
+ * Supports configurable timeouts (20s manual scan / 12s auto-scan) and AbortController cancellation.
  */
 export async function discoverSemanticEntitiesWithNano(
   rawText: string,
-  options: {
-    alreadyMaskedByRegex?: string[];
-    timeoutMs?: number;
-    signal?: AbortSignal;
-  } = {}
+  options: DiscoverNanoOptions = {}
 ): Promise<NanoDiscoveryResult> {
   const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const timeoutMs = options.timeoutMs ?? 5000;
+  const timeoutMs = options.timeoutMs ?? NANO_AUTO_SCAN_TIMEOUT_MS;
   const alreadyMasked = options.alreadyMaskedByRegex ?? [];
   const totalChars = rawText.length;
 
@@ -218,6 +248,7 @@ export async function discoverSemanticEntitiesWithNano(
     return {
       entities: [],
       usedNano: false,
+      timedOut: false,
       latencyMs: 0,
       scannedChars: 0,
       totalChars,
@@ -226,53 +257,73 @@ export async function discoverSemanticEntitiesWithNano(
   }
 
   const controller = new AbortController();
+  let timedOut = false;
   const onParentAbort = () => controller.abort();
   options.signal?.addEventListener('abort', onParentAbort, { once: true });
 
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  const rawCandidates: NanoDiscoveredEntity[] = [];
+  let usedNano = false;
+  let scannedChars = 0;
 
   try {
-    const { createOnDeviceNanoModel } = await import('./hybridAI');
-
-    if (controller.signal.aborted) {
-      return {
-        entities: [],
-        usedNano: false,
-        latencyMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started),
-        scannedChars: 0,
-        totalChars,
-        truncated: totalChars > 0,
+    let runChunk: (prompt: string) => Promise<string>;
+    if (options.generateChunkText) {
+      runChunk = options.generateChunkText;
+    } else {
+      const { createOnDeviceNanoModel } = await import('./hybridAI');
+      if (controller.signal.aborted) {
+        const elapsed = Math.round(
+          (typeof performance !== 'undefined' ? performance.now() : Date.now()) - started
+        );
+        return {
+          entities: [],
+          usedNano: false,
+          timedOut,
+          latencyMs: elapsed,
+          scannedChars: 0,
+          totalChars,
+          truncated: totalChars > 0,
+        };
+      }
+      const model = createOnDeviceNanoModel();
+      runChunk = async (prompt: string) => {
+        const response = await model.generateContent(prompt);
+        return response.response.text();
       };
     }
 
-    const model = createOnDeviceNanoModel();
     const plan = buildNanoChunkPlan(rawText);
-
-    const rawCandidates: NanoDiscoveredEntity[] = [];
-    let usedNano = false;
-    let scannedChars = 0;
 
     for (const chunk of plan.chunks) {
       if (controller.signal.aborted) break;
 
-      const abortPromise = new Promise<never>((_, reject) => {
+      const chunkPromise = new Promise<string>((resolve, reject) => {
         if (controller.signal.aborted) {
-          reject(new DOMException('Nano discovery timed out', 'AbortError'));
+          reject(new DOMException(timedOut ? 'Nano discovery timed out' : 'Nano discovery cancelled', 'AbortError'));
           return;
         }
-        controller.signal.addEventListener(
-          'abort',
-          () => reject(new DOMException('Nano discovery timed out', 'AbortError')),
-          { once: true }
+        const onAbort = () => {
+          reject(new DOMException(timedOut ? 'Nano discovery timed out' : 'Nano discovery cancelled', 'AbortError'));
+        };
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+        runChunk(buildDiscoveryPrompt(chunk.text)).then(
+          (val) => {
+            controller.signal.removeEventListener('abort', onAbort);
+            resolve(val);
+          },
+          (err) => {
+            controller.signal.removeEventListener('abort', onAbort);
+            reject(err);
+          }
         );
       });
 
-      const response = await Promise.race([
-        model.generateContent(buildDiscoveryPrompt(chunk.text)),
-        abortPromise,
-      ]);
-
-      const text = response.response.text().trim();
+      const text = (await chunkPromise).trim();
       if (!text || /not available|echoing back/i.test(text)) {
         continue;
       }
@@ -283,24 +334,31 @@ export async function discoverSemanticEntitiesWithNano(
     }
 
     const filtered = filterNanoEntities(rawText, rawCandidates, alreadyMasked);
-    const elapsed = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started);
+    const elapsed = Math.round(
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()) - started
+    );
     return {
       entities: filtered,
       usedNano,
+      timedOut,
       latencyMs: elapsed,
       scannedChars,
       totalChars,
       truncated: scannedChars < totalChars,
     };
   } catch {
-    const elapsed = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started);
+    const filtered = filterNanoEntities(rawText, rawCandidates, alreadyMasked);
+    const elapsed = Math.round(
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()) - started
+    );
     return {
-      entities: [],
-      usedNano: false,
+      entities: filtered,
+      usedNano,
+      timedOut,
       latencyMs: elapsed,
-      scannedChars: 0,
+      scannedChars,
       totalChars,
-      truncated: totalChars > 0,
+      truncated: scannedChars < totalChars,
     };
   } finally {
     clearTimeout(timer);

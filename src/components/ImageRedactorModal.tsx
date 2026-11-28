@@ -320,8 +320,8 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
             <button
               type="button"
               onClick={handleApply}
-              disabled={scanning}
-              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--n-accent)] px-4 py-1.5 text-[13px] font-medium text-[var(--n-accent-fg)] transition hover:bg-[var(--n-accent-hover)] disabled:opacity-45"
+              disabled={scanning || boxes.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--n-accent)] px-4 py-1.5 text-[13px] font-medium text-[var(--n-accent-fg)] transition hover:bg-[var(--n-accent-hover)] disabled:cursor-not-allowed disabled:opacity-45"
             >
               <ShieldCheck className="h-3.5 w-3.5" />
               Apply mask ({boxes.length})

@@ -1,16 +1,29 @@
 {
   "name": "privaguard-hybrid-ai",
-  "version": "1.0.0",
-  "description": "",
+  "version": "6.3.0",
+  "description": "Privacy-first Hybrid AI document & image workspace — local Regex + on-device Gemini Nano semantic PII masking before Gemini Cloud structured audits (0 detected PII sent to cloud).",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/privaguard.test.ts",
+    "eval": "node scripts/eval-pii.ts",
+    "stress": "node scripts/stress-test.ts",
+    "verify": "npm run typecheck && npm test && npm run eval && npm run stress && npm run build"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "hybrid-ai",
+    "firebase-ai-logic",
+    "gemini-nano",
+    "gemini-flash",
+    "pii-redaction",
+    "privacy",
+    "pwa",
+    "ocr"
+  ],
+  "author": "Nguyen Tuan Anh (tuananh810-fake)",
   "license": "MIT",
   "dependencies": {
     "firebase": "^13.4.0",

@@ -1,5 +1,70 @@
 export type AnalysisTask = 'executive' | 'risk_audit' | 'action_plan' | 'quick_offline';
 
+export const CLOUD_TTFT_TIMEOUT_MS = 8_000;
+export const STALLED_MODEL_COOLDOWN_MS = 5 * 60_000;
+
+export function markCloudModelStalled(
+  stalledModels: Map<string, number>,
+  model: string,
+  now = Date.now()
+): void {
+  stalledModels.set(model, now);
+}
+
+export function isCloudModelCoolingDown(
+  stalledModels: Map<string, number>,
+  model: string,
+  ttlMs = STALLED_MODEL_COOLDOWN_MS,
+  now = Date.now()
+): boolean {
+  const stalledAt = stalledModels.get(model);
+  if (stalledAt === undefined) return false;
+  if (now - stalledAt < ttlMs) return true;
+  stalledModels.delete(model);
+  return false;
+}
+
+export function shouldApplyCloudTtftTimeout(
+  modeKey: string,
+  cloudModel: string,
+  fallbackModel: string,
+  nanoAvailable: boolean
+): boolean {
+  if (cloudModel === fallbackModel || modeKey === 'ONLY_ON_DEVICE') {
+    return false;
+  }
+  return (
+    modeKey === 'PREFER_IN_CLOUD' ||
+    modeKey === 'ONLY_IN_CLOUD' ||
+    (modeKey === 'PREFER_ON_DEVICE' && !nanoAvailable)
+  );
+}
+
+export function shouldEmitStreamChunk(accumulated: string, useStructuredAudit: boolean): boolean {
+  if (!useStructuredAudit) return true;
+  const trimmed = accumulated.trimStart();
+  if (!trimmed) return false;
+  return !trimmed.startsWith('{') && !trimmed.startsWith('```');
+}
+
+export function resolveEffectiveCloudModel(
+  requestedModel: string,
+  fallbackModel: string,
+  modeKey: string,
+  stalledModels: Map<string, number>,
+  now = Date.now(),
+  ttlMs = STALLED_MODEL_COOLDOWN_MS
+): { model: string; bypassedToFallback: boolean } {
+  if (
+    modeKey !== 'ONLY_ON_DEVICE' &&
+    requestedModel !== fallbackModel &&
+    isCloudModelCoolingDown(stalledModels, requestedModel, ttlMs, now)
+  ) {
+    return { model: fallbackModel, bypassedToFallback: true };
+  }
+  return { model: requestedModel, bypassedToFallback: false };
+}
+
 export interface StructuredFinding {
   title: string;
   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';

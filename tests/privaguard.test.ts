@@ -12,15 +12,25 @@ import {
 } from '../src/services/piiVault.ts';
 import {
   buildTaskPrompt,
+  CLOUD_TTFT_TIMEOUT_MS,
   extractRiskBanner,
+  isCloudModelCoolingDown,
+  markCloudModelStalled,
   parseStructuredAudit,
+  resolveEffectiveCloudModel,
+  shouldApplyCloudTtftTimeout,
+  shouldEmitStreamChunk,
+  STALLED_MODEL_COOLDOWN_MS,
   structuredAuditToMarkdown,
 } from '../src/services/hybridHelpers.ts';
 import { matchPiiBoxesFromOcrLines } from '../src/services/ocrPiiMatcher.ts';
 import { classifyDroppedFile, getFileExtension } from '../src/services/documentParser.ts';
 import {
   buildNanoChunkPlan,
+  discoverSemanticEntitiesWithNano,
   filterNanoEntities,
+  NANO_AUTO_SCAN_TIMEOUT_MS,
+  NANO_MANUAL_SCAN_TIMEOUT_MS,
   parseNanoEntityResponse,
 } from '../src/services/nanoEntityDiscovery.ts';
 import { sanitizeAnalysisPayload } from '../src/services/historySanitizer.ts';
@@ -389,4 +399,127 @@ test('v6.2 buildNanoChunkPlan: reports exact character coverage and truncation o
   assert.equal(longPlan.scannedChars, 5_160);
   assert.equal(longPlan.totalChars, 12_400);
   assert.equal(longPlan.truncated, true);
+});
+
+test('v6.3 discoverSemanticEntitiesWithNano: reports timedOut=true on slow Nano, respects custom timeoutMs, and distinguishes AbortController cancel', async () => {
+  assert.equal(NANO_MANUAL_SCAN_TIMEOUT_MS, 20_000);
+  assert.equal(NANO_AUTO_SCAN_TIMEOUT_MS, 12_000);
+
+  const sampleText =
+    'Disclosing Party: NovaGrid Cloud Ltd., 450 Market Street. Contact: Elena Vance and Nguyễn Minh Khôi at elena@novagrid-demo.io.';
+
+  // 1. Slow Nano exceeding custom timeoutMs -> timedOut: true, usedNano: false
+  const timedOutRes = await discoverSemanticEntitiesWithNano(sampleText, {
+    timeoutMs: 25,
+    generateChunkText: () => new Promise((resolve) => setTimeout(() => resolve('[]'), 250)),
+  });
+  assert.equal(timedOutRes.timedOut, true);
+  assert.equal(timedOutRes.usedNano, false);
+  assert.deepEqual(timedOutRes.entities, []);
+
+  // 2. Successful Nano within custom timeoutMs (with trailing comma + hallucination + regex overlap)
+  const successRes = await discoverSemanticEntitiesWithNano(sampleText, {
+    alreadyMaskedByRegex: ['elena@novagrid-demo.io'],
+    timeoutMs: 500,
+    generateChunkText: async () =>
+      '[{"text":"Elena Vance","type":"PERSON"},{"text":"NovaGrid Cloud Ltd.","type":"ORG"},{"text":"450 Market Street","type":"ADDRESS"},{"text":"Nguyễn Minh Khôi","type":"PERSON"},{"text":"Ghost Name","type":"PERSON"},{"text":"elena@novagrid-demo.io","type":"ORG"},]',
+  });
+  assert.equal(successRes.timedOut, false);
+  assert.equal(successRes.usedNano, true);
+  assert.equal(successRes.truncated, false);
+  assert.deepEqual(
+    successRes.entities.map((e) => `${e.type}:${e.text}`),
+    [
+      'PERSON:Elena Vance',
+      'ORG:NovaGrid Cloud Ltd.',
+      'ADDRESS:450 Market Street',
+      'PERSON:Nguyễn Minh Khôi',
+    ]
+  );
+
+  // 3. Parent AbortController cancellation -> timedOut: false (distinct from timeout)
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(), 15);
+  const abortedRes = await discoverSemanticEntitiesWithNano(sampleText, {
+    timeoutMs: 5_000,
+    signal: ac.signal,
+    generateChunkText: () => new Promise((resolve) => setTimeout(() => resolve('[]'), 250)),
+  });
+  assert.equal(abortedRes.timedOut, false);
+  assert.equal(abortedRes.usedNano, false);
+  assert.deepEqual(abortedRes.entities, []);
+});
+
+test('v6.3 cloud TTFT cooldown: 8s timeout + 5m session bypass routes stalled primary model straight to Lite fallback', () => {
+  assert.equal(CLOUD_TTFT_TIMEOUT_MS, 8_000);
+  assert.equal(STALLED_MODEL_COOLDOWN_MS, 300_000);
+
+  const stalled = new Map<string, number>();
+  const t0 = 1_000_000;
+
+  // Before stall -> primary model used
+  assert.deepEqual(
+    resolveEffectiveCloudModel('gemini-3.6-flash', 'gemini-3.5-flash-lite', 'PREFER_IN_CLOUD', stalled, t0),
+    { model: 'gemini-3.6-flash', bypassedToFallback: false }
+  );
+
+  // Mark stalled -> immediately routes to Lite fallback within TTL
+  markCloudModelStalled(stalled, 'gemini-3.6-flash', t0);
+  assert.equal(isCloudModelCoolingDown(stalled, 'gemini-3.6-flash', STALLED_MODEL_COOLDOWN_MS, t0 + 60_000), true);
+  assert.deepEqual(
+    resolveEffectiveCloudModel('gemini-3.6-flash', 'gemini-3.5-flash-lite', 'PREFER_IN_CLOUD', stalled, t0 + 60_000),
+    { model: 'gemini-3.5-flash-lite', bypassedToFallback: true }
+  );
+
+  // Strict offline does NOT bypass
+  assert.deepEqual(
+    resolveEffectiveCloudModel('gemini-3.6-flash', 'gemini-3.5-flash-lite', 'ONLY_ON_DEVICE', stalled, t0 + 60_000),
+    { model: 'gemini-3.6-flash', bypassedToFallback: false }
+  );
+
+  // After 5m TTL expires -> clears entry and retries primary model
+  assert.deepEqual(
+    resolveEffectiveCloudModel(
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'PREFER_IN_CLOUD',
+      stalled,
+      t0 + STALLED_MODEL_COOLDOWN_MS
+    ),
+    { model: 'gemini-3.6-flash', bypassedToFallback: false }
+  );
+  assert.equal(stalled.has('gemini-3.6-flash'), false);
+});
+
+test('v6.3 shouldApplyCloudTtftTimeout: guards Auto Hybrid when Chrome Nano is not available', () => {
+  const primary = 'gemini-3.6-flash';
+  const fallback = 'gemini-3.5-flash-lite';
+
+  // Auto Hybrid (PREFER_ON_DEVICE): applies 8s TTFT timeout when Nano is unavailable/downloadable, skips when Nano is ready
+  assert.equal(shouldApplyCloudTtftTimeout('PREFER_ON_DEVICE', primary, fallback, false), true);
+  assert.equal(shouldApplyCloudTtftTimeout('PREFER_ON_DEVICE', primary, fallback, true), false);
+
+  // Cloud-first / Cloud-only always applies timeout on primary model
+  assert.equal(shouldApplyCloudTtftTimeout('PREFER_IN_CLOUD', primary, fallback, true), true);
+  assert.equal(shouldApplyCloudTtftTimeout('ONLY_IN_CLOUD', primary, fallback, true), true);
+
+  // Strict Offline and fallback model itself never apply primary cloud timeout
+  assert.equal(shouldApplyCloudTtftTimeout('ONLY_ON_DEVICE', primary, fallback, false), false);
+  assert.equal(shouldApplyCloudTtftTimeout('PREFER_IN_CLOUD', fallback, fallback, false), false);
+  assert.equal(shouldApplyCloudTtftTimeout('PREFER_ON_DEVICE', fallback, fallback, false), false);
+});
+
+test('v6.3 shouldEmitStreamChunk: suppresses raw JSON flicker on Cloud while streaming Markdown live on Nano', () => {
+  // Non-structured tasks always stream live
+  assert.equal(shouldEmitStreamChunk('{"raw": 1}', false), true);
+  assert.equal(shouldEmitStreamChunk('### TL;DR', false), true);
+
+  // Structured audit suppresses leading whitespace, raw JSON objects, and fenced JSON blocks
+  assert.equal(shouldEmitStreamChunk('   \n  ', true), false);
+  assert.equal(shouldEmitStreamChunk('{"riskLevel":"CRITICAL"', true), false);
+  assert.equal(shouldEmitStreamChunk('\n```json\n{"riskLevel":"HIGH"', true), false);
+
+  // Structured audit allows plain Markdown (e.g., on-device Nano response) to stream live
+  assert.equal(shouldEmitStreamChunk('### Risk Level\n**HIGH**', true), true);
+  assert.equal(shouldEmitStreamChunk('  **Executive Summary:** [SECRET_1] exposed.', true), true);
 });

@@ -145,17 +145,26 @@ function renderInline(
 }
 
 export const HighlightedRedactedText = memo(
-  ({ text, vaultLookup }: { text: string; vaultLookup?: Record<string, VaultEntry> }) => {
+  ({
+    text,
+    vaultLookup,
+    inline = false,
+  }: {
+    text: string;
+    vaultLookup?: Record<string, VaultEntry>;
+    inline?: boolean;
+  }) => {
     const parts = text.split(TOKEN_REGEX);
+    const Wrapper = inline ? 'span' : 'div';
     return (
-      <div className="whitespace-pre-wrap break-words">
+      <Wrapper className={inline ? 'break-words' : 'whitespace-pre-wrap break-words'}>
         {parts.map((part, idx) => {
           if (EXACT_TOKEN_REGEX.test(part)) {
             return <InteractiveTokenChip key={idx} token={part} vaultLookup={vaultLookup} />;
           }
           return <React.Fragment key={idx}>{part}</React.Fragment>;
         })}
-      </div>
+      </Wrapper>
     );
   }
 );

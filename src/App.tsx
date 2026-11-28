@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { KeyRound, Moon, Settings, ShieldCheck, Sun, X } from 'lucide-react';
+import { History, KeyRound, Moon, Settings, ShieldCheck, Sun, X } from 'lucide-react';
 import { loadRemoteSettings, RemoteSettings } from './firebase';
 import { SAMPLE_DOCUMENTS } from './data/samples';
 import {
@@ -42,7 +42,7 @@ import type { SavedAnalysis } from './services/historyStore';
 import { TechDrawer } from './components/TechDrawer';
 import { DocumentInputPanel, InputTabKey } from './components/DocumentInputPanel';
 import { AnalysisOutputPanel, RunMetrics } from './components/AnalysisOutputPanel';
-import { HistoryStrip } from './components/HistoryStrip';
+import { HistoryDrawer } from './components/HistoryStrip';
 
 const ImageRedactorModal = lazy(() =>
   import('./components/ImageRedactorModal').then((m) => ({ default: m.ImageRedactorModal }))
@@ -53,6 +53,15 @@ type ThemeMode = 'light' | 'dark';
 function formatNanoScanNotice(scan: NanoDiscoveryResult): string {
   const count = scan.entities.length;
   const entityLabel = count === 1 ? 'entity' : 'entities';
+  if (scan.timedOut) {
+    const secs = Math.max(1, Math.round(scan.latencyMs / 1000));
+    return count > 0
+      ? `Nano timed out (${secs}s) · kept ${count} partial ${entityLabel}`
+      : `Nano timed out (${secs}s) · retry scan or mark names manually`;
+  }
+  if (!scan.usedNano) {
+    return 'Nano unavailable for this scan · mark names manually';
+  }
   if (scan.truncated && scan.scannedChars > 0) {
     return `Nano scanned first ${scan.scannedChars.toLocaleString()} of ${scan.totalChars.toLocaleString()} chars · found ${count} ${entityLabel} · mark later names manually`;
   }
@@ -82,6 +91,7 @@ export default function App() {
   const [task, setTask] = useState<AnalysisTask>('risk_audit');
   const [inputTab, setInputTab] = useState<InputTabKey>('original');
   const [showTechDrawer, setShowTechDrawer] = useState(false);
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
 
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [simulatedOffline, setSimulatedOffline] = useState(false);
@@ -105,6 +115,7 @@ export default function App() {
   const [scanningNano, setScanningNano] = useState(false);
   const [nanoScanNotice, setNanoScanNotice] = useState<string | null>(null);
   const [nanoScanTruncated, setNanoScanTruncated] = useState(false);
+  const [nanoScanTimedOut, setNanoScanTimedOut] = useState(false);
   const [extraFollowUpVault, setExtraFollowUpVault] = useState<VaultEntry[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [result, setResult] = useState<HybridResponse | null>(null);
@@ -340,8 +351,16 @@ export default function App() {
   const handleRawTextChange = useCallback((val: string) => {
     nanoScanAbortRef.current?.abort();
     nanoScannedTextRef.current = null;
+    if (nanoEntitiesRef.current.length > 0) {
+      const remaining = nanoEntitiesRef.current.filter((e) => val.includes(e.text));
+      if (remaining.length !== nanoEntitiesRef.current.length) {
+        nanoEntitiesRef.current = remaining;
+        setAiDiscoveredEntities(remaining);
+      }
+    }
     setNanoScanNotice(null);
     setNanoScanTruncated(false);
+    setNanoScanTimedOut(false);
     setRawText(val);
   }, []);
 
@@ -354,6 +373,7 @@ export default function App() {
     setScanningNano(false);
     setNanoScanNotice(null);
     setNanoScanTruncated(false);
+    setNanoScanTimedOut(false);
     setIsHistoricalView(false);
     setRawText(content);
     setFileMeta(null);
@@ -373,7 +393,24 @@ export default function App() {
     nanoScannedTextRef.current = null;
     setNanoScanNotice(null);
     setNanoScanTruncated(false);
+    setNanoScanTimedOut(false);
     setCategories((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  const handleQuickModeChange = useCallback((nextMode: ModeKey) => {
+    setMode(nextMode);
+    if (nextMode !== 'ONLY_ON_DEVICE') {
+      setSimulatedOffline(false);
+    }
+  }, []);
+
+  const handleCancelNanoScan = useCallback(() => {
+    nanoScanAbortRef.current?.abort();
+    nanoScanAbortRef.current = null;
+    setScanningNano(false);
+    setNanoScanTruncated(false);
+    setNanoScanTimedOut(false);
+    setNanoScanNotice('Nano scan cancelled');
   }, []);
 
   const handleScanNano = useCallback(async () => {
@@ -385,27 +422,32 @@ export default function App() {
     setScanningNano(true);
     setNanoScanNotice(null);
     setNanoScanTruncated(false);
+    setNanoScanTimedOut(false);
 
     try {
       const regexOnly = redactLocally(rawText, [], categories);
-      const { discoverSemanticEntitiesWithNano } = await import('./services/nanoEntityDiscovery');
+      const { discoverSemanticEntitiesWithNano, NANO_MANUAL_SCAN_TIMEOUT_MS } = await import(
+        './services/nanoEntityDiscovery'
+      );
       const localScan = await discoverSemanticEntitiesWithNano(rawText, {
         alreadyMaskedByRegex: regexOnly.vault.map((v) => v.original),
-        timeoutMs: 5000,
+        timeoutMs: NANO_MANUAL_SCAN_TIMEOUT_MS,
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
 
       const discovered = localScan.entities;
       nanoEntitiesRef.current = discovered;
-      nanoScannedTextRef.current = rawText;
+      nanoScannedTextRef.current = !localScan.timedOut && localScan.usedNano ? rawText : null;
       setAiDiscoveredEntities(discovered);
       setNanoScanTruncated(localScan.truncated && localScan.scannedChars > 0);
+      setNanoScanTimedOut(localScan.timedOut);
       setNanoScanNotice(formatNanoScanNotice(localScan));
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       setNanoScanTruncated(false);
-      setNanoScanNotice('Nano scan complete · 0 new entities');
+      setNanoScanTimedOut(false);
+      setNanoScanNotice('Nano unavailable for this scan · mark names manually');
     } finally {
       if (nanoScanAbortRef.current === controller) {
         nanoScanAbortRef.current = null;
@@ -423,6 +465,7 @@ export default function App() {
     setScanningNano(false);
     setNanoScanNotice(null);
     setNanoScanTruncated(false);
+    setNanoScanTimedOut(false);
     setIsHistoricalView(false);
     setExtractingFile(true);
     setErrorMsg(null);
@@ -528,18 +571,21 @@ export default function App() {
           discovered = nanoEntitiesRef.current;
         } else {
           const regexOnly = redactLocally(rawText, [], categories);
-          const { discoverSemanticEntitiesWithNano } = await import('./services/nanoEntityDiscovery');
+          const { discoverSemanticEntitiesWithNano, NANO_AUTO_SCAN_TIMEOUT_MS } = await import(
+            './services/nanoEntityDiscovery'
+          );
           const localScan = await discoverSemanticEntitiesWithNano(rawText, {
             alreadyMaskedByRegex: regexOnly.vault.map((v) => v.original),
-            timeoutMs: 5000,
+            timeoutMs: NANO_AUTO_SCAN_TIMEOUT_MS,
             signal: controller.signal,
           });
           if (controller.signal.aborted) return;
           discovered = localScan.entities;
           nanoEntitiesRef.current = discovered;
-          nanoScannedTextRef.current = rawText;
+          nanoScannedTextRef.current = !localScan.timedOut && localScan.usedNano ? rawText : null;
           setAiDiscoveredEntities(discovered);
           setNanoScanTruncated(localScan.truncated && localScan.scannedChars > 0);
+          setNanoScanTimedOut(localScan.timedOut);
           setNanoScanNotice(formatNanoScanNotice(localScan));
         }
       }
@@ -569,7 +615,8 @@ export default function App() {
         },
         controller.signal,
         remoteSettings.systemPromptStyle,
-        useStructuredAudit
+        useStructuredAudit,
+        nanoStatus === 'available'
       );
 
       if (!controller.signal.aborted) {
@@ -655,10 +702,12 @@ export default function App() {
         if (nanoStatus === 'available' && rawQuestion.trim()) {
           try {
             const regexOnly = redactLocally(rawQuestion, [], categories, combinedVault);
-            const { discoverSemanticEntitiesWithNano } = await import('./services/nanoEntityDiscovery');
+            const { discoverSemanticEntitiesWithNano, NANO_FOLLOWUP_SCAN_TIMEOUT_MS } = await import(
+              './services/nanoEntityDiscovery'
+            );
             const localScan = await discoverSemanticEntitiesWithNano(rawQuestion, {
               alreadyMaskedByRegex: regexOnly.vault.map((v) => v.original),
-              timeoutMs: 2500,
+              timeoutMs: NANO_FOLLOWUP_SCAN_TIMEOUT_MS,
               signal: controller.signal,
             });
             if (controller.signal.aborted) return;
@@ -702,7 +751,8 @@ export default function App() {
           (partial) => {
             if (!controller.signal.aborted) scheduleStreamUpdate(setFollowUpStreaming, partial);
           },
-          controller.signal
+          controller.signal,
+          nanoStatus === 'available'
         );
 
         if (!controller.signal.aborted) {
@@ -862,6 +912,11 @@ export default function App() {
     setRunMetrics(null);
     setFollowUps([]);
     setFollowUpStreaming('');
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      requestAnimationFrame(() => {
+        outputContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
   }, []);
 
   const handleDeleteHistory = useCallback(
@@ -893,66 +948,92 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[var(--n-bg)] text-[var(--n-text)]">
+    <div className="flex min-h-screen flex-col overflow-x-clip bg-[var(--n-bg)] text-[var(--n-text)] lg:h-screen lg:overflow-hidden">
       {/* Ultra-clean 48px Notion Topbar */}
-      <header className="sticky top-0 z-20 flex h-12 items-center justify-between border-b border-[var(--n-border)] bg-[var(--n-bg)] px-4 sm:px-6">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-[18px] w-[18px] text-[var(--n-accent)]" />
-          <h1 className="text-[14.5px] font-semibold tracking-tight text-[var(--n-text)]">
-            PrivaGuard
-          </h1>
-          {nanoStatus === 'available' && (
-            <span className="hidden items-center gap-1 rounded bg-[var(--n-accent-soft)] px-2 py-0.5 text-[11.5px] font-medium text-[var(--n-accent)] sm:inline-flex">
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--n-accent)]" />
-              Gemini Nano ready
-            </span>
-          )}
-        </div>
+      <header className="sticky top-0 z-20 h-12 shrink-0 border-b border-[var(--n-border)] bg-[var(--n-bg)]">
+        <div className="mx-auto flex h-full max-w-[1680px] items-center justify-between px-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-2">
+            <ShieldCheck className="h-[18px] w-[18px] shrink-0 text-[var(--n-accent)]" />
+            <h1 className="text-[14.5px] font-semibold tracking-tight text-[var(--n-text)]">
+              PrivaGuard
+            </h1>
+            {nanoStatus === 'available' && (
+              <span className="hidden items-center gap-1 rounded bg-[var(--n-accent-soft)] px-2 py-0.5 text-[11.5px] font-medium text-[var(--n-accent)] sm:inline-flex">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--n-accent)]" />
+                Gemini Nano
+              </span>
+            )}
+          </div>
 
-        <div className="flex items-center gap-1.5">
-          {/* Quiet Status Dot (click to toggle offline simulation) */}
-          <button
-            type="button"
-            onClick={() => setSimulatedOffline((v) => !v)}
-            title="Click to simulate offline on-device mode"
-            className="inline-flex items-center gap-2 rounded-md px-2.5 py-1 text-[12.5px] text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
-          >
-            <span
-              className={`h-2 w-2 rounded-full ${
-                effectiveOnline ? 'bg-[var(--n-accent)]' : 'bg-[var(--n-warn)]'
-              }`}
-            />
-            <span className="hidden sm:inline">
-              {simulatedOffline
-                ? 'Offline · On-device'
-                : effectiveOnline
-                  ? nanoStatus === 'available'
-                    ? 'Hybrid · Nano ready'
-                    : 'Cloud · Masked tokens'
-                  : 'Offline · On-device'}
-            </span>
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            {/* Quiet Status Dot (click to toggle offline simulation) */}
+            <button
+              type="button"
+              onClick={() => setSimulatedOffline((v) => !v)}
+              title="Click to simulate offline on-device mode"
+              aria-label={
+                simulatedOffline || !effectiveOnline
+                  ? 'Offline on-device mode (click to switch)'
+                  : nanoStatus === 'available'
+                    ? 'Hybrid mode (click to simulate offline)'
+                    : 'Cloud mode (click to simulate offline)'
+              }
+              className="inline-flex items-center gap-2 rounded-md px-2.5 py-1 text-[12.5px] text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  effectiveOnline ? 'bg-[var(--n-accent)]' : 'bg-[var(--n-warn)]'
+                }`}
+              />
+              <span className="hidden sm:inline">
+                {simulatedOffline
+                  ? 'Offline · On-device'
+                  : effectiveOnline
+                    ? nanoStatus === 'available'
+                      ? 'Hybrid'
+                      : 'Cloud'
+                    : 'Offline · On-device'}
+              </span>
+            </button>
 
-          {/* Settings Slide-Over Trigger */}
-          <button
-            type="button"
-            onClick={() => setShowTechDrawer(true)}
-            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12.5px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
-          >
-            <Settings className="h-3.5 w-3.5" />
-            Settings
-          </button>
+            {/* Saved Reports Slide-Over Trigger */}
+            <button
+              type="button"
+              onClick={() => setShowHistoryDrawer(true)}
+              aria-label={`Saved reports (${history.length})`}
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12.5px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+            >
+              <History className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">History</span>
+              {history.length > 0 && (
+                <span className="rounded bg-[var(--n-surface)] px-1.5 py-0.2 font-mono text-[11px] tabular-nums text-[var(--n-text)]">
+                  {history.length}
+                </span>
+              )}
+            </button>
 
-          {/* Subtle Light / Dark Mode Toggle */}
-          <button
-            type="button"
-            onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
-            title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-            aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-            className="rounded-md p-1.5 text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
-          >
-            {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-          </button>
+            {/* Settings Slide-Over Trigger */}
+            <button
+              type="button"
+              onClick={() => setShowTechDrawer(true)}
+              aria-label="Privacy and settings"
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12.5px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Settings</span>
+            </button>
+
+            {/* Subtle Light / Dark Mode Toggle */}
+            <button
+              type="button"
+              onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+              title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+              aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+              className="rounded-md p-1.5 text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
+            >
+              {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -960,7 +1041,7 @@ export default function App() {
       {nanoChecked && nanoStatus !== 'available' && !nanoBannerDismissed && (
         <div
           role="status"
-          className="flex items-center justify-between gap-3 border-b border-[var(--n-border)] bg-[var(--n-surface)] px-4 py-1.5 text-[12px] text-[var(--n-muted)] sm:px-6"
+          className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--n-border)] bg-[var(--n-surface)] px-4 py-1.5 text-[12px] text-[var(--n-muted)] sm:px-6"
         >
           <p className="min-w-0 truncate sm:whitespace-normal">
             On-device model unavailable — running Cloud with masked tokens only ·{' '}
@@ -985,8 +1066,8 @@ export default function App() {
       )}
 
       {/* Notion Split-View Workspace */}
-      <main>
-        <div className="grid grid-cols-1 lg:grid-cols-2">
+      <main className="min-h-0 flex-1">
+        <div className="mx-auto grid max-w-[1680px] grid-cols-1 lg:h-full lg:grid-cols-2">
           <DocumentInputPanel
             rawText={rawText}
             onRawTextChange={handleRawTextChange}
@@ -1010,7 +1091,9 @@ export default function App() {
             scanningNano={scanningNano}
             nanoScanNotice={nanoScanNotice}
             nanoScanTruncated={nanoScanTruncated}
+            nanoScanTimedOut={nanoScanTimedOut}
             onScanNano={handleScanNano}
+            onCancelNanoScan={handleCancelNanoScan}
             onOpenNanoGuide={() => setShowTechDrawer(true)}
             attachedImage={attachedImage}
             imageMaskCount={imageMaskCount}
@@ -1021,12 +1104,15 @@ export default function App() {
             }}
             task={task}
             onTaskChange={setTask}
+            mode={mode}
+            simulatedOffline={simulatedOffline}
+            onQuickModeChange={handleQuickModeChange}
             running={running}
             onRunPipeline={handleRunPipeline}
             onStop={handleStop}
           />
 
-          <div ref={outputContainerRef} className="flex flex-col">
+          <div ref={outputContainerRef} className="flex min-w-0 flex-col lg:h-full lg:min-h-0">
             <AnalysisOutputPanel
               result={result}
               runMetrics={runMetrics}
@@ -1056,14 +1142,18 @@ export default function App() {
             />
           </div>
         </div>
+      </main>
 
-        <HistoryStrip
+      {/* Slide-Over Saved Reports Drawer */}
+      {showHistoryDrawer && (
+        <HistoryDrawer
           history={history}
           firestoreError={firestoreError}
           onSelect={handleSelectHistory}
           onDelete={handleDeleteHistory}
+          onClose={() => setShowHistoryDrawer(false)}
         />
-      </main>
+      )}
 
       {/* Slide-Over Privacy & Technical Settings */}
       {showTechDrawer && (
@@ -1131,6 +1221,9 @@ export default function App() {
               needs a debug token from Firebase Console. Production Hosting works automatically.
             </p>
             <input
+              id="appcheck-debug-token"
+              name="appcheckDebugToken"
+              aria-label="Localhost App Check debug token"
               type="text"
               value={debugTokenInput}
               onChange={(e) => setDebugTokenInput(e.target.value)}

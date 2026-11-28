@@ -50,7 +50,12 @@
 }
 
 @layer base {
-  html,
+  html {
+    background-color: var(--n-bg);
+    color: var(--n-text);
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
   body {
     background-color: var(--n-bg);
     color: var(--n-text);
