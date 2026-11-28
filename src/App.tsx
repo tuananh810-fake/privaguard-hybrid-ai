@@ -331,6 +331,13 @@ export default function App() {
     return rehydrate && !isHistoricalView ? rehydrateLocally(src, combinedVault) : src;
   }, [result, streamingText, rehydrate, isHistoricalView, combinedVault]);
 
+  const cancelPendingStreamFrame = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+
   const scheduleStreamUpdate = useCallback(
     (setter: React.Dispatch<React.SetStateAction<string>>, text: string) => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -345,9 +352,10 @@ export default function App() {
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    cancelPendingStreamFrame();
     setRunning(false);
     setFollowUpRunning(false);
-  }, []);
+  }, [cancelPendingStreamFrame]);
 
   const handleRawTextChange = useCallback((val: string) => {
     nanoScanAbortRef.current?.abort();
@@ -366,30 +374,34 @@ export default function App() {
     setRawText(val);
   }, []);
 
-  const handleSelectSample = useCallback((content: string) => {
-    abortRef.current?.abort();
-    nanoScanAbortRef.current?.abort();
-    nanoScannedTextRef.current = null;
-    nanoEntitiesRef.current = [];
-    setRunning(false);
-    setScanningNano(false);
-    setNanoScanCompleted(false);
-    setNanoScanNotice(null);
-    setNanoScanTruncated(false);
-    setNanoScanTimedOut(false);
-    setIsHistoricalView(false);
-    setRawText(content);
-    setFileMeta(null);
-    setAiDiscoveredEntities([]);
-    setRunMetrics(null);
-    setResult(null);
-    setStreamingText('');
-    setFollowUps([]);
-    setExtraFollowUpVault([]);
-    setFollowUpStreaming('');
-    setErrorMsg(null);
-    setSavedNotice(null);
-  }, []);
+  const handleSelectSample = useCallback(
+    (content: string) => {
+      abortRef.current?.abort();
+      nanoScanAbortRef.current?.abort();
+      cancelPendingStreamFrame();
+      nanoScannedTextRef.current = null;
+      nanoEntitiesRef.current = [];
+      setRunning(false);
+      setScanningNano(false);
+      setNanoScanCompleted(false);
+      setNanoScanNotice(null);
+      setNanoScanTruncated(false);
+      setNanoScanTimedOut(false);
+      setIsHistoricalView(false);
+      setRawText(content);
+      setFileMeta(null);
+      setAiDiscoveredEntities([]);
+      setRunMetrics(null);
+      setResult(null);
+      setStreamingText('');
+      setFollowUps([]);
+      setExtraFollowUpVault([]);
+      setFollowUpStreaming('');
+      setErrorMsg(null);
+      setSavedNotice(null);
+    },
+    [cancelPendingStreamFrame]
+  );
 
   const handleToggleCategory = useCallback((key: PiiCategory) => {
     nanoScanAbortRef.current?.abort();
@@ -462,39 +474,43 @@ export default function App() {
     }
   }, [nanoStatus, rawText, categories, scanningNano]);
 
-  const processDocumentFile = useCallback(async (file: File) => {
-    abortRef.current?.abort();
-    nanoScanAbortRef.current?.abort();
-    nanoScannedTextRef.current = null;
-    nanoEntitiesRef.current = [];
-    setRunning(false);
-    setScanningNano(false);
-    setNanoScanCompleted(false);
-    setNanoScanNotice(null);
-    setNanoScanTruncated(false);
-    setNanoScanTimedOut(false);
-    setIsHistoricalView(false);
-    setExtractingFile(true);
-    setErrorMsg(null);
-    try {
-      const parsed = await parseDocumentLocally(file);
-      setRawText(parsed.text);
-      setFileMeta(parsed.meta);
-      setAiDiscoveredEntities([]);
-      setRunMetrics(null);
-      setResult(null);
-      setStreamingText('');
-      setFollowUps([]);
-      setExtraFollowUpVault([]);
-      setFollowUpStreaming('');
-      setSavedNotice(null);
-      setInputTab('original');
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
-    } finally {
-      setExtractingFile(false);
-    }
-  }, []);
+  const processDocumentFile = useCallback(
+    async (file: File) => {
+      abortRef.current?.abort();
+      nanoScanAbortRef.current?.abort();
+      cancelPendingStreamFrame();
+      nanoScannedTextRef.current = null;
+      nanoEntitiesRef.current = [];
+      setRunning(false);
+      setScanningNano(false);
+      setNanoScanCompleted(false);
+      setNanoScanNotice(null);
+      setNanoScanTruncated(false);
+      setNanoScanTimedOut(false);
+      setIsHistoricalView(false);
+      setExtractingFile(true);
+      setErrorMsg(null);
+      try {
+        const parsed = await parseDocumentLocally(file);
+        setRawText(parsed.text);
+        setFileMeta(parsed.meta);
+        setAiDiscoveredEntities([]);
+        setRunMetrics(null);
+        setResult(null);
+        setStreamingText('');
+        setFollowUps([]);
+        setExtraFollowUpVault([]);
+        setFollowUpStreaming('');
+        setSavedNotice(null);
+        setInputTab('original');
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : String(err));
+      } finally {
+        setExtractingFile(false);
+      }
+    },
+    [cancelPendingStreamFrame]
+  );
 
   const processImageFile = useCallback((file: File) => {
     const reader = new FileReader();
@@ -645,6 +661,7 @@ export default function App() {
               findLeakedOriginals(finalRedaction.redactedText, finalRedaction.vault)
             );
 
+        cancelPendingStreamFrame();
         setResult(aiRes);
         setRunMetrics({
           sourceCounts: finalRedaction.sourceCounts,
@@ -659,6 +676,7 @@ export default function App() {
         setStreamingText(aiRes.text);
       }
     } catch (err) {
+      cancelPendingStreamFrame();
       if (err instanceof DOMException && err.name === 'AbortError') return;
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
@@ -678,6 +696,7 @@ export default function App() {
     attachedImage,
     remoteSettings.cloudModel,
     remoteSettings.systemPromptStyle,
+    cancelPendingStreamFrame,
     scheduleStreamUpdate,
   ]);
 
@@ -690,13 +709,11 @@ export default function App() {
         }
       } else if (e.key === 'Escape') {
         if (showDebugModal) setShowDebugModal(false);
-        else if (showImageRedactor) setShowImageRedactor(false);
-        else if (showTechDrawer) setShowTechDrawer(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [running, rawText, handleRunPipeline, showDebugModal, showImageRedactor, showTechDrawer]);
+  }, [running, rawText, handleRunPipeline, showDebugModal]);
 
   const handleSendFollowUp = useCallback(
     async (rawQuestion: string) => {
@@ -768,6 +785,7 @@ export default function App() {
         );
 
         if (!controller.signal.aborted) {
+          cancelPendingStreamFrame();
           if (aiRes.nanoUnavailable || aiRes.wasMockEcho) {
             setFollowUpStreaming('');
             setErrorMsg(
@@ -788,6 +806,8 @@ export default function App() {
           setFollowUpStreaming('');
         }
       } catch (err) {
+        cancelPendingStreamFrame();
+        setFollowUpStreaming('');
         if (err instanceof DOMException && err.name === 'AbortError') return;
         setErrorMsg(err instanceof Error ? err.message : String(err));
       } finally {
@@ -811,6 +831,7 @@ export default function App() {
       redaction.redactedText,
       remoteSettings.cloudModel,
       remoteSettings.systemPromptStyle,
+      cancelPendingStreamFrame,
       scheduleStreamUpdate,
     ]
   );
@@ -913,30 +934,34 @@ export default function App() {
     }
   }, [result, isHistoricalView, task, runMetrics, combinedVault.length, redaction, loadHistoryStore]);
 
-  const handleSelectHistory = useCallback((item: SavedAnalysis) => {
-    abortRef.current?.abort();
-    setRunning(false);
-    setFollowUpRunning(false);
-    setIsHistoricalView(true);
-    setRehydrate(false);
-    setSavedNotice(null);
-    setErrorMsg(null);
-    setResult({
-      text: item.analysisText,
-      inferenceSource: item.inferenceSource === 'ON_DEVICE' ? 'ON_DEVICE' : 'IN_CLOUD',
-      latencyMs: item.latencyMs,
-      ttftMs: item.ttftMs || item.latencyMs,
-      modelUsed: item.modelUsed,
-    });
-    setRunMetrics(null);
-    setFollowUps([]);
-    setFollowUpStreaming('');
-    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-      requestAnimationFrame(() => {
-        outputContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const handleSelectHistory = useCallback(
+    (item: SavedAnalysis) => {
+      abortRef.current?.abort();
+      cancelPendingStreamFrame();
+      setRunning(false);
+      setFollowUpRunning(false);
+      setIsHistoricalView(true);
+      setRehydrate(false);
+      setSavedNotice(null);
+      setErrorMsg(null);
+      setResult({
+        text: item.analysisText,
+        inferenceSource: item.inferenceSource === 'ON_DEVICE' ? 'ON_DEVICE' : 'IN_CLOUD',
+        latencyMs: item.latencyMs,
+        ttftMs: item.ttftMs || item.latencyMs,
+        modelUsed: item.modelUsed,
       });
-    }
-  }, []);
+      setRunMetrics(null);
+      setFollowUps([]);
+      setFollowUpStreaming('');
+      if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+        requestAnimationFrame(() => {
+          outputContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+    },
+    [cancelPendingStreamFrame]
+  );
 
   const handleDeleteHistory = useCallback(
     (id: string) => {
@@ -966,8 +991,29 @@ export default function App() {
     }
   }, []);
 
+  const handleClearFileMeta = useCallback(() => setFileMeta(null), []);
+  const handleOpenTechDrawer = useCallback(() => setShowTechDrawer(true), []);
+  const handleOpenImageRedactor = useCallback(() => setShowImageRedactor(true), []);
+  const handleRemoveImage = useCallback(() => {
+    setAttachedImage(null);
+    setImageMaskCount(0);
+  }, []);
+  const handleToggleRehydrate = useCallback(() => {
+    if (!isHistoricalView) setRehydrate((r) => !r);
+  }, [isHistoricalView]);
+  const handleSwitchToFastCloud = useCallback(
+    () => handleQuickModeChange('PREFER_IN_CLOUD'),
+    [handleQuickModeChange]
+  );
+
   return (
     <div className="flex min-h-screen flex-col overflow-x-clip bg-[var(--n-bg)] text-[var(--n-text)] lg:h-screen lg:overflow-hidden">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-[var(--n-accent)] focus:px-3 focus:py-1.5 focus:text-sm focus:font-medium focus:text-[var(--n-accent-fg)]"
+      >
+        Skip to main content
+      </a>
       {/* Ultra-clean 48px Notion Topbar */}
       <header className="sticky top-0 z-20 h-12 shrink-0 border-b border-[var(--n-border)] bg-[var(--n-bg)]">
         <div className="mx-auto flex h-full max-w-[1680px] items-center justify-between px-4 sm:px-6">
@@ -1085,7 +1131,7 @@ export default function App() {
       )}
 
       {/* Notion Split-View Workspace */}
-      <main className="min-h-0 flex-1">
+      <main id="main-content" className="min-h-0 flex-1">
         <div className="mx-auto grid max-w-[1680px] grid-cols-1 lg:h-full lg:grid-cols-2">
           <DocumentInputPanel
             rawText={rawText}
@@ -1096,7 +1142,7 @@ export default function App() {
             onFileDrop={handleFileDrop}
             extractingFile={extractingFile}
             fileMeta={fileMeta}
-            onClearFileMeta={() => setFileMeta(null)}
+            onClearFileMeta={handleClearFileMeta}
             inputTab={inputTab}
             onInputTabChange={setInputTab}
             redaction={redaction}
@@ -1114,14 +1160,11 @@ export default function App() {
             nanoScanTimedOut={nanoScanTimedOut}
             onScanNano={handleScanNano}
             onCancelNanoScan={handleCancelNanoScan}
-            onOpenNanoGuide={() => setShowTechDrawer(true)}
+            onOpenNanoGuide={handleOpenTechDrawer}
             attachedImage={attachedImage}
             imageMaskCount={imageMaskCount}
-            onOpenImageRedactor={() => setShowImageRedactor(true)}
-            onRemoveImage={() => {
-              setAttachedImage(null);
-              setImageMaskCount(0);
-            }}
+            onOpenImageRedactor={handleOpenImageRedactor}
+            onRemoveImage={handleRemoveImage}
             task={task}
             onTaskChange={setTask}
             mode={mode}
@@ -1145,9 +1188,7 @@ export default function App() {
               bytesShielded={redaction.bytesShielded}
               shieldTimeMs={redaction.shieldTimeMs}
               rehydrate={rehydrate}
-              onToggleRehydrate={() => {
-                if (!isHistoricalView) setRehydrate((r) => !r);
-              }}
+              onToggleRehydrate={handleToggleRehydrate}
               savingHistory={savingHistory}
               savedNotice={savedNotice}
               onSaveToFirestore={handleSaveToFirestore}
@@ -1155,7 +1196,7 @@ export default function App() {
               onCopyReport={handleCopyReport}
               onExportMarkdown={handleExportMarkdown}
               onQuickStart={handleRunPipeline}
-              onSwitchToFastCloud={() => handleQuickModeChange('PREFER_IN_CLOUD')}
+              onSwitchToFastCloud={handleSwitchToFastCloud}
               followUps={followUps}
               followUpStreaming={followUpStreaming}
               followUpRunning={followUpRunning}
@@ -1223,7 +1264,7 @@ export default function App() {
           aria-label="Localhost App Check Debug Token"
           className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--n-overlay)] p-4"
         >
-          <div className="w-full max-w-md rounded-xl border border-[var(--n-border)] bg-[var(--n-bg)] p-5">
+          <div className="w-full max-w-md overscroll-contain rounded-xl border border-[var(--n-border)] bg-[var(--n-bg)] p-5">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="flex items-center gap-2 text-[14.5px] font-semibold text-[var(--n-text)]">
                 <KeyRound className="h-4 w-4 text-[var(--n-warn)]" />
@@ -1231,6 +1272,7 @@ export default function App() {
               </h3>
               <button
                 type="button"
+                aria-label="Close debug token modal"
                 onClick={() => setShowDebugModal(false)}
                 className="rounded-md p-1 text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
               >
@@ -1245,11 +1287,13 @@ export default function App() {
               id="appcheck-debug-token"
               name="appcheckDebugToken"
               aria-label="Localhost App Check debug token"
+              autoComplete="off"
+              spellCheck={false}
               type="text"
               value={debugTokenInput}
               onChange={(e) => setDebugTokenInput(e.target.value)}
-              placeholder="Paste UUID debug token (leave empty to clear)"
-              className="mb-3 w-full rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-2 font-mono text-[12.5px] text-[var(--n-text)] focus:border-[var(--n-accent)] focus:outline-none"
+              placeholder="Paste UUID debug token (leave empty to clear)…"
+              className="mb-3 w-full rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-3 py-2 font-mono text-[12.5px] text-[var(--n-text)] focus:border-[var(--n-accent)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--n-accent)]"
             />
             <div className="flex justify-end gap-2">
               <button

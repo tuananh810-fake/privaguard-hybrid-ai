@@ -1,6 +1,6 @@
 {
   "name": "privaguard-hybrid-ai",
-  "version": "6.3.0",
+  "version": "6.3.2",
   "description": "Privacy-first Hybrid AI document & image workspace — local Regex + on-device Gemini Nano semantic PII masking before Gemini Cloud structured audits (0 detected PII sent to cloud).",
   "type": "module",
   "scripts": {

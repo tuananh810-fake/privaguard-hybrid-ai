@@ -1,3 +1,5 @@
+import { isMockNanoEcho } from './hybridHelpers.ts';
+
 export type NanoEntityType = 'PERSON' | 'ORG' | 'ADDRESS' | 'LOCATION';
 
 export interface NanoDiscoveredEntity {
@@ -101,7 +103,7 @@ function extractEntityObjectsFallback(raw: string): NanoDiscoveredEntity[] {
 export function parseNanoEntityResponse(rawOutput: string): NanoDiscoveredEntity[] {
   if (!rawOutput || typeof rawOutput !== 'string') return [];
   const trimmed = rawOutput.trim();
-  if (!trimmed || /not available|echoing back/i.test(trimmed)) return [];
+  if (!trimmed || isMockNanoEcho(trimmed)) return [];
 
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   let candidate = fenced ? fenced[1].trim() : trimmed;
@@ -324,7 +326,7 @@ export async function discoverSemanticEntitiesWithNano(
       });
 
       const text = (await chunkPromise).trim();
-      if (!text || /not available|echoing back/i.test(text)) {
+      if (!text || isMockNanoEcho(text)) {
         continue;
       }
 

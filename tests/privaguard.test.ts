@@ -585,3 +585,32 @@ test('v6.3.1 isMockNanoEcho & sanitizeNanoResult: detects Chromium stub without 
   assert.equal(realNano.nanoUnavailable, false);
   assert.equal(realNano.latencyMs, 812);
 });
+
+test('v6.3.2 findLeakedOriginals & verifyZeroLeak: detects 2-3 char terms without substring false positives', () => {
+  const vault = [
+    { token: '[ORG_1]', category: 'ORG' as const, original: 'IBM' },
+    { token: '[PERSON_1]', category: 'PERSON' as const, original: 'An' },
+  ];
+
+  // Standalone 3-char and 2-char leaks are detected
+  assert.deepEqual(findLeakedOriginals('Contract with IBM signed by An today.', vault), ['IBM', 'An']);
+  assert.equal(verifyZeroLeak('Contract with IBM signed by [PERSON_1] today.', vault), 1);
+
+  // Substrings inside longer words ("Analysis", "banana", "RIBMON") must NOT trigger false positives
+  assert.deepEqual(
+    findLeakedOriginals('Analysis of banana supply chain and RIBMON logs with [ORG_1] and [PERSON_1].', vault),
+    []
+  );
+  assert.equal(verifyZeroLeak('Analysis of banana supply chain for [ORG_1].', vault), 0);
+});
+
+test('v6.3.2 parseNanoEntityResponse: rejects Chromium mock echo cleanly via isMockNanoEcho', () => {
+  const mockEcho =
+    'On-device model is not available in Chromium, this API is just echoing back the input:\n[{"text":"Elena Vance","type":"PERSON"}]';
+  assert.deepEqual(parseNanoEntityResponse(mockEcho), []);
+
+  // Valid JSON array with a normal entity still parses
+  assert.deepEqual(parseNanoEntityResponse('[{"text":"Elena Vance","type":"PERSON"}]'), [
+    { text: 'Elena Vance', type: 'PERSON' },
+  ]);
+});

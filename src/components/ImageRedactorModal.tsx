@@ -227,7 +227,7 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
       aria-label="Hide private areas on image"
       className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--n-overlay)] p-4"
     >
-      <div className="w-full max-w-3xl rounded-xl border border-[var(--n-border)] bg-[var(--n-bg)] p-5">
+      <div className="w-full max-w-3xl overscroll-contain rounded-xl border border-[var(--n-border)] bg-[var(--n-bg)] p-5">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="flex items-center gap-2 text-[15px] font-semibold text-[var(--n-text)]">
             <ShieldCheck className="h-4 w-4 text-[var(--n-accent)]" />
@@ -251,6 +251,8 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
         <div className="flex max-h-[54vh] items-center justify-center overflow-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-2">
           <canvas
             ref={canvasRef}
+            role="img"
+            aria-label="Interactive image redaction canvas"
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -329,7 +331,7 @@ export const ImageRedactorModal: React.FC<ImageRedactorModalProps> = ({
           </div>
         </div>
         <p
-          title="Mô hình OCR chỉ tải 1 lần; ảnh của bạn không bao giờ rời khỏi thiết bị"
+          title="OCR model downloads once; your image never leaves this device"
           className="mt-2 text-[11.5px] text-[var(--n-muted)]"
         >
           OCR model downloads once · your image never leaves this device

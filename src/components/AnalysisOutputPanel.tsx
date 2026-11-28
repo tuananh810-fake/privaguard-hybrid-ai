@@ -80,6 +80,9 @@ function formatEngineLabel(result: HybridResponse): string {
   return `Ran on: Cloud (${cleanModel})`;
 }
 
+const EMPTY_VAULT: VaultEntry[] = [];
+const EMPTY_VAULT_LOOKUP: Record<string, VaultEntry> = {};
+
 const SEVERITY_BADGE: Record<string, string> = {
   CRITICAL: 'bg-[var(--n-danger-soft)] text-[var(--n-danger)]',
   HIGH: 'bg-[var(--n-warn-soft)] text-[var(--n-warn)]',
@@ -490,15 +493,15 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
               <StructuredAuditView
                 report={result.structuredAudit}
                 rehydrate={effectiveRehydrate}
-                vault={isHistoricalView ? [] : vault}
-                vaultLookup={effectiveVaultLookup ?? {}}
+                vault={isHistoricalView ? EMPTY_VAULT : vault}
+                vaultLookup={effectiveVaultLookup ?? EMPTY_VAULT_LOOKUP}
               />
               <FollowUpThread
                 followUps={followUps}
                 followUpStreaming={followUpStreaming}
                 rehydrate={effectiveRehydrate}
-                vault={isHistoricalView ? [] : vault}
-                vaultLookup={effectiveVaultLookup ?? {}}
+                vault={isHistoricalView ? EMPTY_VAULT : vault}
+                vaultLookup={effectiveVaultLookup ?? EMPTY_VAULT_LOOKUP}
               />
             </>
           ) : displayedMarkdown ? (
@@ -515,8 +518,8 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                 followUps={followUps}
                 followUpStreaming={followUpStreaming}
                 rehydrate={effectiveRehydrate}
-                vault={isHistoricalView ? [] : vault}
-                vaultLookup={effectiveVaultLookup ?? {}}
+                vault={isHistoricalView ? EMPTY_VAULT : vault}
+                vaultLookup={effectiveVaultLookup ?? EMPTY_VAULT_LOOKUP}
               />
             </>
           ) : running ? (
@@ -526,7 +529,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                 Protected {vault.length} private item{vault.length === 1 ? '' : 's'} ({bytesShielded}B) on this device
               </p>
               <p className="text-[13px] text-[var(--n-muted)]">
-                Streaming safe AI analysis...
+                Streaming safe AI analysis…
               </p>
             </div>
           ) : (
@@ -602,7 +605,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                 className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-muted)] transition hover:bg-[var(--n-hover)] hover:text-[var(--n-text)] disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <Save className="h-3.5 w-3.5" />
-                {savingHistory ? 'Saving...' : 'Save'}
+                {savingHistory ? 'Saving…' : 'Save'}
               </button>
 
               <button
@@ -641,6 +644,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                   id="followup-question"
                   name="followupQuestion"
                   aria-label="Follow-up question"
+                  autoComplete="off"
                   type="text"
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
@@ -648,7 +652,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
                   placeholder={
                     isHistoricalView
                       ? 'Read-only snapshot · Analyze a document to ask follow-ups'
-                      : 'Ask a follow-up question (private details auto-hidden)...'
+                      : 'Ask a follow-up question (private details auto-hidden)…'
                   }
                   className="min-w-0 flex-1 bg-transparent py-1 text-[13.5px] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none disabled:cursor-not-allowed"
                 />

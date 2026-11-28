@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { getAI, GoogleAIBackend } from 'firebase/ai';
-import { getRemoteConfig, fetchAndActivate, getString } from 'firebase/remote-config';
 
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyAvwsoI0zTybrE4qM-tN8cJX2RAH7o_ZCA',
@@ -37,14 +36,6 @@ export const appCheck = initializeAppCheck(app, {
 });
 
 export const ai = getAI(app, { backend: new GoogleAIBackend() });
-export const remoteConfig = getRemoteConfig(app);
-
-remoteConfig.settings.minimumFetchIntervalMillis = 60_000;
-remoteConfig.defaultConfig = {
-  default_inference_mode: 'PREFER_ON_DEVICE',
-  cloud_model: 'gemini-3.6-flash',
-  system_prompt_style: 'concise_executive',
-};
 
 export interface RemoteSettings {
   defaultInferenceMode: string;
@@ -65,6 +56,14 @@ function normalizeCloudModel(raw: string): string {
 
 export async function loadRemoteSettings(): Promise<RemoteSettings> {
   try {
+    const { getRemoteConfig, fetchAndActivate, getString } = await import('firebase/remote-config');
+    const remoteConfig = getRemoteConfig(app);
+    remoteConfig.settings.minimumFetchIntervalMillis = 60_000;
+    remoteConfig.defaultConfig = {
+      default_inference_mode: 'PREFER_ON_DEVICE',
+      cloud_model: DEFAULT_CLOUD_MODEL,
+      system_prompt_style: 'concise_executive',
+    };
     const activated = await fetchAndActivate(remoteConfig);
     return {
       defaultInferenceMode: getString(remoteConfig, 'default_inference_mode') || 'PREFER_ON_DEVICE',
@@ -75,7 +74,7 @@ export async function loadRemoteSettings(): Promise<RemoteSettings> {
   } catch {
     return {
       defaultInferenceMode: 'PREFER_ON_DEVICE',
-      cloudModel: 'gemini-3.6-flash',
+      cloudModel: DEFAULT_CLOUD_MODEL,
       systemPromptStyle: 'concise_executive',
       loadedFromServer: false,
     };

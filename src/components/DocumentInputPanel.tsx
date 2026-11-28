@@ -586,8 +586,8 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                 onMouseUp={syncSelection}
                 onKeyDown={handleTextareaKeyDown}
                 rows={7}
-                placeholder="Paste text or drop a PDF, Word (.docx), log file, or image here. Highlight any word and press Ctrl/Cmd+Shift+M to mark it sensitive..."
-                className="min-h-[140px] w-full flex-1 resize-none overflow-y-auto bg-transparent py-1.5 pb-3 text-[14.5px] leading-[1.65] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none"
+                placeholder="Paste text or drop a PDF, Word (.docx), log file, or image here. Highlight any word and press Ctrl/Cmd+Shift+M to mark it sensitive…"
+                className="min-h-[140px] w-full flex-1 resize-none overflow-y-auto rounded bg-transparent py-1.5 pb-3 text-[14.5px] leading-[1.65] text-[var(--n-text)] placeholder:text-[var(--n-muted)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--n-accent)]"
               />
               {activeManualTerms.length > 0 && (
                 <div
@@ -812,7 +812,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               aria-label="Analysis goal"
               value={task}
               onChange={(e) => onTaskChange(e.target.value as AnalysisTask)}
-              className="rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] focus:outline-none"
+              className="rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-2.5 py-1.5 text-[13px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--n-accent)]"
             >
               {TASK_OPTIONS.map((t) => (
                 <option key={t.key} value={t.key}>
@@ -843,7 +843,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               {running ? (
                 <>
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                  Analyzing...
+                  Analyzing…
                 </>
               ) : (
                 <>

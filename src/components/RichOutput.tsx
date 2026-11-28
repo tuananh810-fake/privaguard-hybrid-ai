@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { VaultEntry } from '../services/piiVault';
 
@@ -95,6 +95,7 @@ const InteractiveTokenChip: React.FC<TokenChipProps> = memo(
         ref={buttonRef}
         type="button"
         translate="no"
+        aria-expanded={peek}
         onClick={() => setPeek((v) => !v)}
         title={
           peek
@@ -299,7 +300,7 @@ export const RichOutput = memo(
     vaultLookup?: Record<string, VaultEntry>;
     isHistorical?: boolean;
   }) => {
-    const blocks = parseMarkdownBlocks(markdown);
+    const blocks = useMemo(() => parseMarkdownBlocks(markdown), [markdown]);
 
     return (
       <div className="space-y-2.5 text-[15px] leading-[1.65] text-[var(--n-text)]">
@@ -345,23 +346,23 @@ export const RichOutput = memo(
 
           if (line.startsWith('### ')) {
             return (
-              <h3 key={i} className="pt-3 text-[16px] font-semibold tracking-tight text-[var(--n-text)]">
+              <h5 key={i} className="pt-3 text-[16px] font-semibold tracking-tight text-[var(--n-text)]">
                 {renderInline(line.slice(4), vaultLookup, isHistorical)}
-              </h3>
+              </h5>
             );
           }
           if (line.startsWith('## ')) {
             return (
-              <h2 key={i} className="pt-3 text-[18px] font-semibold tracking-tight text-[var(--n-text)]">
+              <h4 key={i} className="pt-3 text-[18px] font-semibold tracking-tight text-[var(--n-text)]">
                 {renderInline(line.slice(3), vaultLookup, isHistorical)}
-              </h2>
+              </h4>
             );
           }
           if (line.startsWith('# ')) {
             return (
-              <h1 key={i} className="pt-3 text-[20px] font-bold tracking-tight text-[var(--n-text)]">
+              <h3 key={i} className="pt-3 text-[20px] font-bold tracking-tight text-[var(--n-text)]">
                 {renderInline(line.slice(2), vaultLookup, isHistorical)}
-              </h1>
+              </h3>
             );
           }
           if (line.startsWith('> ')) {

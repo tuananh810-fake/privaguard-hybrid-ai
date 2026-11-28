@@ -129,6 +129,7 @@ const CATEGORY_WEIGHT: Record<PiiCategory, number> = {
 };
 
 const EXISTING_TOKEN_SPAN_REGEX = /\[[A-Z]+_\d+\]/g;
+const TEXT_ENCODER = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -242,9 +243,8 @@ export function redactLocally(
     }
   }
 
-  const encoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
   const bytesShielded = vault.reduce(
-    (acc, item) => acc + (encoder ? encoder.encode(item.original).length : item.original.length),
+    (acc, item) => acc + (TEXT_ENCODER ? TEXT_ENCODER.encode(item.original).length : item.original.length),
     0
   );
   const leaksFound = verifyZeroLeak(redacted, vault);
@@ -286,7 +286,7 @@ export function findLeakedOriginals(
 ): string[] {
   const leaks: string[] = [];
   for (const entry of vault) {
-    if (entry.original.length < 4) continue;
+    if (entry.original.length < 2) continue;
     const escaped = escapeRegExp(entry.original);
     const startsWord = /^[A-Za-z0-9_]/.test(entry.original);
     const endsWord = /[A-Za-z0-9_]$/.test(entry.original);
@@ -322,10 +322,9 @@ export function verifyZeroLeak(
  */
 export function computeRawPiiBytes(leaks: string[]): number {
   if (leaks.length === 0) return 0;
-  const encoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
   let total = 0;
   for (const item of leaks) {
-    total += encoder ? encoder.encode(item).length : item.length;
+    total += TEXT_ENCODER ? TEXT_ENCODER.encode(item).length : item.length;
   }
   return total;
 }

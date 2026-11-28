@@ -148,6 +148,7 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
                     <button
                       type="button"
                       key={cat.key}
+                      aria-pressed={active}
                       onClick={() => onToggleCategory(cat.key)}
                       className={`rounded-md border px-2.5 py-1 text-[12.5px] font-medium transition ${
                         active
@@ -172,10 +173,11 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
                 <input
                   id="custom-terms"
                   name="customTerms"
+                  autoComplete="off"
                   type="text"
                   value={customTerms}
                   onChange={(e) => onCustomTermsChange(e.target.value)}
-                  className="w-full rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-3 py-1.5 text-[13px] text-[var(--n-text)] focus:border-[var(--n-accent)] focus:outline-none"
+                  className="w-full rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-3 py-1.5 text-[13px] text-[var(--n-text)] focus:border-[var(--n-accent)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--n-accent)]"
                 />
               </div>
             </section>
@@ -198,7 +200,7 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
                   name="inferenceMode"
                   value={mode}
                   onChange={(e) => onModeChange(e.target.value as ModeKey)}
-                  className="w-full rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-3 py-1.5 text-[13px] text-[var(--n-text)] focus:border-[var(--n-accent)] focus:outline-none"
+                  className="w-full rounded-md border border-[var(--n-border)] bg-[var(--n-bg)] px-3 py-1.5 text-[13px] text-[var(--n-text)] focus:border-[var(--n-accent)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--n-accent)]"
                 >
                   {MODE_OPTIONS.map((m) => (
                     <option key={m.key} value={m.key}>
@@ -268,6 +270,7 @@ export const TechDrawer: React.FC<TechDrawerProps> = memo(
                       type="button"
                       onClick={onRefreshRemoteConfig}
                       title="Refresh Remote Config"
+                      aria-label="Refresh Remote Config"
                       className="rounded p-0.5 text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]"
                     >
                       <RefreshCw className="h-3 w-3" />
