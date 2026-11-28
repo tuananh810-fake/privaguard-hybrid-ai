@@ -15,9 +15,11 @@ import {
   CLOUD_TTFT_TIMEOUT_MS,
   extractRiskBanner,
   isCloudModelCoolingDown,
+  isMockNanoEcho,
   markCloudModelStalled,
   parseStructuredAudit,
   resolveEffectiveCloudModel,
+  sanitizeNanoResult,
   shouldApplyCloudTtftTimeout,
   shouldEmitStreamChunk,
   STALLED_MODEL_COOLDOWN_MS,
@@ -522,4 +524,64 @@ test('v6.3 shouldEmitStreamChunk: suppresses raw JSON flicker on Cloud while str
   // Structured audit allows plain Markdown (e.g., on-device Nano response) to stream live
   assert.equal(shouldEmitStreamChunk('### Risk Level\n**HIGH**', true), true);
   assert.equal(shouldEmitStreamChunk('  **Executive Summary:** [SECRET_1] exposed.', true), true);
+
+  // Chromium mock-echo chunks (including early prefix chunks) are suppressed before flashing on screen
+  assert.equal(shouldEmitStreamChunk('On-device model is not available', false), false);
+  assert.equal(
+    shouldEmitStreamChunk(
+      'On-device model is not available in Chromium, this API is just echoing back the input:\nDocument...',
+      false
+    ),
+    false
+  );
+  // Real Nano prose starting with "On-device" still streams once it diverges from the stub
+  assert.equal(shouldEmitStreamChunk('On-device security summary: [SECRET_1] exposed.', false), true);
+});
+
+test('v6.3.1 isMockNanoEcho & sanitizeNanoResult: detects Chromium stub without false positives and strips echo/ON_DEVICE label', () => {
+  const chromiumEcho =
+    'On-device model is not available in Chromium, this API is just echoing back the input:\n\nYou are PrivaGuard AI...';
+
+  // Exact Chromium echo detected
+  assert.equal(isMockNanoEcho(chromiumEcho), true);
+  assert.equal(isMockNanoEcho('This API is just echoing back the prompt.'), true);
+
+  // Normal analysis prose containing "available" is NOT detected
+  assert.equal(isMockNanoEcho('Key rotation is available in IAM console for [SECRET_1].'), false);
+  assert.equal(isMockNanoEcho('Backup region is not available during incident window.'), false);
+  assert.equal(isMockNanoEcho(''), false);
+
+  // Sanitized mock echo has empty text, nanoUnavailable=true, zero timings, and is NOT labeled ON_DEVICE
+  const sanitizedEcho = sanitizeNanoResult({
+    text: chromiumEcho,
+    inferenceSource: 'ON_DEVICE',
+    latencyMs: 3420,
+    ttftMs: 3420,
+    modelUsed: 'Gemini Nano (On-Device)',
+    wasMockEcho: true,
+    structuredAudit: null,
+  });
+  assert.equal(sanitizedEcho.text, '');
+  assert.equal(sanitizedEcho.nanoUnavailable, true);
+  assert.equal(sanitizedEcho.wasMockEcho, true);
+  assert.notEqual(sanitizedEcho.inferenceSource, 'ON_DEVICE');
+  assert.equal(sanitizedEcho.inferenceSource, 'UNKNOWN');
+  assert.equal(sanitizedEcho.latencyMs, 0);
+  assert.equal(sanitizedEcho.ttftMs, 0);
+  assert.equal(sanitizedEcho.structuredAudit, null);
+
+  // Real on-device result passes through untouched
+  const realNano = sanitizeNanoResult({
+    text: 'High risk: rotate [SECRET_1] immediately.',
+    inferenceSource: 'ON_DEVICE',
+    latencyMs: 812,
+    ttftMs: 240,
+    modelUsed: 'Gemini Nano (On-Device)',
+    wasMockEcho: false,
+    structuredAudit: null,
+  });
+  assert.equal(realNano.text, 'High risk: rotate [SECRET_1] immediately.');
+  assert.equal(realNano.inferenceSource, 'ON_DEVICE');
+  assert.equal(realNano.nanoUnavailable, false);
+  assert.equal(realNano.latencyMs, 812);
 });

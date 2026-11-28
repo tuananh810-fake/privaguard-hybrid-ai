@@ -40,7 +40,56 @@ export function shouldApplyCloudTtftTimeout(
   );
 }
 
+const MOCK_NANO_ECHO_REGEX = /on-device model is not available in chromium|this api is just echoing back|not available in chromium.*echoing back/i;
+const MOCK_NANO_ECHO_PREFIX = 'on-device model is not available in chromium';
+
+export function isMockNanoEcho(text: string): boolean {
+  if (!text) return false;
+  return MOCK_NANO_ECHO_REGEX.test(text);
+}
+
+export function isPossibleMockNanoEchoPrefix(text: string): boolean {
+  const trimmed = text.trimStart().toLowerCase();
+  if (!trimmed) return false;
+  if (MOCK_NANO_ECHO_REGEX.test(trimmed)) return true;
+  return trimmed.length < MOCK_NANO_ECHO_PREFIX.length && MOCK_NANO_ECHO_PREFIX.startsWith(trimmed);
+}
+
+export function sanitizeNanoResult<
+  T extends {
+    text: string;
+    inferenceSource: 'ON_DEVICE' | 'IN_CLOUD' | 'UNKNOWN';
+    latencyMs: number;
+    ttftMs: number;
+    modelUsed: string;
+    wasMockEcho?: boolean;
+    nanoUnavailable?: boolean;
+    structuredAudit?: StructuredAuditReport | null;
+  },
+>(res: T): T {
+  const unavailable = Boolean(res.nanoUnavailable || res.wasMockEcho || isMockNanoEcho(res.text));
+  if (!unavailable) {
+    return {
+      ...res,
+      wasMockEcho: false,
+      nanoUnavailable: false,
+    };
+  }
+  return {
+    ...res,
+    text: '',
+    inferenceSource: 'UNKNOWN',
+    latencyMs: 0,
+    ttftMs: 0,
+    modelUsed: 'Gemini Nano (Unavailable)',
+    wasMockEcho: true,
+    nanoUnavailable: true,
+    structuredAudit: null,
+  };
+}
+
 export function shouldEmitStreamChunk(accumulated: string, useStructuredAudit: boolean): boolean {
+  if (isPossibleMockNanoEchoPrefix(accumulated)) return false;
   if (!useStructuredAudit) return true;
   const trimmed = accumulated.trimStart();
   if (!trimmed) return false;

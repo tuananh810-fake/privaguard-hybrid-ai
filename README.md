@@ -7,7 +7,7 @@
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Firebase%20Hosting-0F7B6C?style=flat-square)](https://buildhybridai-tuananh.web.app)
 [![Built for](https://img.shields.io/badge/Hackathon-%23BuildHybridAI%202026-37352F?style=flat-square)](https://buildhybridai.devpost.com/)
 [![Firebase AI Logic](https://img.shields.io/badge/Firebase%20AI%20Logic-Hybrid%20Nano%20%2B%20Gemini%203.6%20Flash-DD2C00?style=flat-square)](https://firebase.google.com/docs/ai-logic)
-[![Tests](https://img.shields.io/badge/Unit%20Tests-20%2F20%20PASS-0F7B6C?style=flat-square)](#benchmarks--verification)
+[![Tests](https://img.shields.io/badge/Unit%20Tests-21%2F21%20PASS-0F7B6C?style=flat-square)](#benchmarks--verification)
 
 **Live App:** https://buildhybridai-tuananh.web.app · **User Guide:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) · **Devpost Pack:** [DEVPOST_SUBMISSION.md](DEVPOST_SUBMISSION.md)
 
@@ -22,9 +22,9 @@
 |---|---|
 | ![Cloud Snapshot Audit](docs/screenshots/03-cloud-snapshot-audit.png) | ![Auto-OCR ID Redaction](docs/screenshots/04-auto-ocr-id-redaction.png) |
 
-| Strict Offline Multimodal Nano (`0 B` Cloud) | Architecture & Verified Benchmarks |
+| Strict Offline Guard (`0 B` to Cloud) | Architecture & Verified Benchmarks |
 |---|---|
-| ![Strict Offline Nano](docs/screenshots/05-strict-offline-nano.png) | ![Architecture & Metrics](docs/screenshots/06-architecture-metrics-slide.png) |
+| ![Strict Offline Guard](docs/screenshots/05-strict-offline-guard.png) | ![Architecture & Metrics](docs/screenshots/06-architecture-metrics-slide.png) |
 
 </details>
 
@@ -78,7 +78,7 @@ flowchart LR
 - **8 s Cloud TTFT Fallback + 5-Minute Cooldown & On-Device Quota Trimming:** If a primary cloud model (`gemini-3.6-flash`) stalls before Time-To-First-Token (**TTFT**), PrivaGuard automatically falls back to `gemini-3.5-flash-lite` (`Lite fallback` badge) after **8 s** and caches a **5-minute** session cooldown so subsequent requests route straight to Lite in ~1.4 s. In **Strict Offline** mode, oversized documents automatically excerpt locally instead of throwing Chrome Prompt API `QuotaExceededError` (`0 B` sent to cloud).
 - **Inline Hybrid Mode Pill & Slide-Over History Drawer:** Switch directly between `Auto Hybrid | Fast Cloud | Strict Offline` in the workspace action bar, inspect saved Firestore snapshots via the top-bar **`History`** slide-over drawer (clean `1.4s` duration formatting, `Escape` close, WCAG-compliant sibling controls), and keep the entire split-pane above the fold at `1280×720` and `1920×1080`.
 - **Immediate Abort During TTFT:** Stream open, chunk iteration, and fallback model calls race against `AbortSignal` (`raceWithAbort`), so clicking **Stop** cancels immediately even while waiting for the first token.
-- **One-Command Verification (`npm run verify`):** Runs `typecheck`, `test` (**20/20**), `eval` (52 EN+VI samples), `stress` (1,000 docs), and production `build` in one command.
+- **One-Command Verification (`npm run verify`):** Runs `typecheck`, `test` (**21/21**), `eval` (52 EN+VI samples), `stress` (1,000 docs), and production `build` in one command.
 - **Hosting Security Headers & PWA v6.3.0:** Added `X-Frame-Options: SAMEORIGIN` alongside `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`, `no-cache` on `/`, `/index.html`, and `/sw.js`, and upgraded the Service Worker cache to `privaguard-shell-v6.3.0`.
 - **v6.2 Foundations Retained:** Honest Nano truncation coverage (`scannedChars / totalChars` across 5,160-char budget), read-only **Anonymized Cloud Snapshot** mode in History, follow-up Nano scanning, immutable SHA-256 `.md` proofs, `sanitizeAnalysisPayload` Firestore clamping, `Mark as sensitive` (`Ctrl/Cmd+Shift+M`), `unknown token` chips, `eng+vie` Auto-OCR image redaction, and full PWA/OG assets.
 
@@ -128,11 +128,11 @@ Measured by `npm run eval` (`node scripts/eval-pii.ts`) across **52 synthetic EN
 | Verification Suite | Real Measured Result |
 |---|---|
 | **Full Gate (`npm run verify`)** | Runs `typecheck` + `test` + `eval` + `stress` + `build` end-to-end |
-| **Unit Tests** (`npm test`) | **20/20 PASS** (JWT, PEM, DB URI, CCCD, VN/US phones & VN landline `028-3822-1234`, `999.999.999.999`, `v1.2.3.4`, `1.2.3.4-rc1`, case-insensitive terms, Follow-up vault continuation, `parseStructuredAudit`, `ocrPiiMatcher` EN + VI diacritics, `documentParser`, `nanoEntityDiscovery` anti-hallucination, chunk truncation, 20s/12s timeouts & `AbortController` cancel distinction, 8s Cloud TTFT timeout + 5m cooldown bypass, `shouldApplyCloudTtftTimeout` Auto Hybrid guard, `shouldEmitStreamChunk` JSON-vs-Markdown streaming guard, unknown token audit, prompt-injection defense, exact UTF-8 `rawPiiBytesSent`, `sanitizeAnalysisPayload` Firestore clamping) |
+| **Unit Tests** (`npm test`) | **21/21 PASS** (JWT, PEM, DB URI, CCCD, VN/US phones & VN landline `028-3822-1234`, `999.999.999.999`, `v1.2.3.4`, `1.2.3.4-rc1`, case-insensitive terms, Follow-up vault continuation, `parseStructuredAudit`, `ocrPiiMatcher` EN + VI diacritics, `documentParser`, `nanoEntityDiscovery` anti-hallucination, chunk truncation, 20s/12s timeouts & `AbortController` cancel distinction, 8s Cloud TTFT timeout + 5m cooldown bypass, `shouldApplyCloudTtftTimeout` Auto Hybrid guard, `shouldEmitStreamChunk` JSON-vs-Markdown & mock-echo stream guard, `isMockNanoEcho` & `sanitizeNanoResult` Chromium stub guard, unknown token audit, prompt-injection defense, exact UTF-8 `rawPiiBytesSent`, `sanitizeAnalysisPayload` Firestore clamping) |
 | **Regex Accuracy Eval** (`npm run eval`) | **Precision 100.0% · Recall 100.0% · F1 100.0%** across 52 EN+VI samples (**11/11** decoys clean) |
-| **Concurrency Stress Test** (`npm run stress`) | **1,000 docs in 219 ms** (`0.219 ms/doc`) · **5,000 secrets** · **0 detected leaks** · **0 mismatches** |
-| **Bundle Discipline** (`npm run build`) | `index.js`: **190.27 kB** (`54.31 kB` gzip, ≤ 55 kB budget) · `nanoEntityDiscovery`, `pdfjs-dist`, `mammoth`, `tesseract.js`, `firestore` all strictly lazy-loaded |
-| **Live Production QA (`https://buildhybridai-tuananh.web.app`)** | Deployed as `index-WVAHhPWb.js` (e2e UX/Cloud/OCR/Offline verified on v6.3): `0` HTTP `>= 400` errors, `0` app console errors, pixel-exact `1280×720` / `1920×1080` / `390×844` layout, `nda-sample.pdf` 2-page local extract + `Fast Cloud` Risk Card (`Critical 92/100`, `gemini-3.5-flash-lite` fallback `10.6s` → `1.4s` via cooldown, `Raw PII bytes sent: 0 B`), Firestore `Save` + `History` slide-over drawer + read-only snapshot, Auto-OCR (`3` masks in `3.1s`), and `Strict Offline` (`Device (Nano)`, `0 B` to cloud). *(Live Nano semantic scan requires Chrome Desktop with downloaded Nano weights.)* |
+| **Concurrency Stress Test** (`npm run stress`) | **1,000 docs in 249 ms** (`0.249 ms/doc`) · **5,000 secrets** · **0 detected leaks** · **0 mismatches** |
+| **Bundle Discipline** (`npm run build`) | `index.js`: **193.42 kB** (`54.99 kB` gzip, ≤ 55 kB budget) · `nanoEntityDiscovery`, `pdfjs-dist`, `mammoth`, `tesseract.js`, `firestore` all strictly lazy-loaded |
+| **Live Production QA (`https://buildhybridai-tuananh.web.app`)** | Deployed as `index-BZBF-p2b.js` (HTTP `200`, `X-Frame-Options: SAMEORIGIN`): `0` HTTP `>= 400` errors, `0` app console errors, `nda-sample.pdf` 2-page local extract + `Fast Cloud` Risk Card (`Critical · Score 88/100`, `gemini-3.6-flash` in `7.1s` / `TTFT 5.4s`, `Raw PII bytes sent: 0 B`, all tokens masked, `Escape` closes Click-to-Peek), Firestore `Save` + `History` slide-over drawer + read-only snapshot, Auto-OCR (`3` masks), and `Strict Offline` guard (`Nano unavailable` badge, `Bytes to cloud: 0 B`, `Raw PII bytes sent: 0 B`, zero Chromium mock echo). *(Live Nano semantic scan & on-device inference require Chrome Desktop with downloaded Nano weights.)* |
 
 ---
 

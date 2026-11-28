@@ -5,10 +5,12 @@ import {
   buildTaskPrompt,
   CLOUD_TTFT_TIMEOUT_MS,
   extractRiskBanner,
+  isMockNanoEcho,
   markCloudModelStalled,
   ParsedRiskBanner,
   parseStructuredAudit,
   resolveEffectiveCloudModel,
+  sanitizeNanoResult,
   shouldApplyCloudTtftTimeout,
   shouldEmitStreamChunk,
   StructuredAuditReport,
@@ -37,6 +39,7 @@ export interface HybridResponse {
   ttftMs: number;
   modelUsed: string;
   wasMockEcho?: boolean;
+  nanoUnavailable?: boolean;
   cached?: boolean;
   fallbackUsed?: boolean;
   structuredAudit?: StructuredAuditReport | null;
@@ -313,6 +316,7 @@ async function runSingleStream(
       primaryCloudTimeoutMs
     );
     let accumulated = '';
+    let detectedMockEcho = false;
     const iterator = streamResult.stream[Symbol.asyncIterator]();
     while (true) {
       const remainingTtftMs =
@@ -325,7 +329,11 @@ async function runSingleStream(
       if (chunkText) {
         if (ttftMs === 0) ttftMs = Math.round(performance.now() - started);
         accumulated += chunkText;
-        if (shouldEmitStreamChunk(accumulated, useStructuredAudit)) {
+        if (!detectedMockEcho && isMockNanoEcho(accumulated)) {
+          detectedMockEcho = true;
+          onChunk?.('');
+        }
+        if (!detectedMockEcho && shouldEmitStreamChunk(accumulated, useStructuredAudit)) {
           onChunk?.(accumulated);
         }
       }
@@ -340,14 +348,13 @@ async function runSingleStream(
     const rawText = accumulated || finalResp.text();
     const latencyMs = Math.round(performance.now() - started);
     const inferenceSource = detectSource(finalResp.inferenceSource, modeKey);
-    const wasMockEcho = /not available in chromium|echoing back/i.test(rawText);
+    const wasMockEcho = detectedMockEcho || isMockNanoEcho(rawText);
 
     const structuredAudit =
       useStructuredAudit && !wasMockEcho ? parseStructuredAudit(rawText) : null;
     const finalText = structuredAudit ? structuredAuditToMarkdown(structuredAudit) : rawText;
-    onChunk?.(finalText);
 
-    return {
+    const sanitized = sanitizeNanoResult({
       text: finalText,
       inferenceSource,
       latencyMs,
@@ -355,7 +362,9 @@ async function runSingleStream(
       modelUsed: inferenceSource === 'ON_DEVICE' ? 'Gemini Nano (On-Device)' : `${cloudModel} (Cloud)`,
       wasMockEcho,
       structuredAudit,
-    };
+    });
+    onChunk?.(sanitized.text);
+    return sanitized;
   } catch (streamErr) {
     if (signal?.aborted || (streamErr instanceof DOMException && streamErr.name === 'AbortError')) {
       throw streamErr;
@@ -382,10 +391,9 @@ async function runSingleStream(
     };
     const text = response.text();
     const inferenceSource = detectSource(response.inferenceSource, modeKey);
-    const wasMockEcho = /not available in chromium|echoing back/i.test(text);
-    onChunk?.(text);
+    const wasMockEcho = isMockNanoEcho(text);
     if (!text && streamErr) throw streamErr;
-    return {
+    const sanitized = sanitizeNanoResult({
       text,
       inferenceSource,
       latencyMs,
@@ -393,7 +401,9 @@ async function runSingleStream(
       modelUsed: inferenceSource === 'ON_DEVICE' ? 'Gemini Nano (On-Device)' : `${cloudModel} (Cloud)`,
       wasMockEcho,
       structuredAudit: null,
-    };
+    });
+    onChunk?.(sanitized.text);
+    return sanitized;
   }
 }
 
@@ -443,7 +453,7 @@ export async function generateHybridStream(
   );
 
   const storeInCache = (entry: HybridResponse) => {
-    if (entry.wasMockEcho) return;
+    if (entry.wasMockEcho || entry.nanoUnavailable) return;
     if (responseCache.size >= MAX_CACHE_ENTRIES) {
       const firstKey = responseCache.keys().next().value;
       if (firstKey) responseCache.delete(firstKey);

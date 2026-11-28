@@ -113,6 +113,7 @@ export default function App() {
 
   const [aiDiscoveredEntities, setAiDiscoveredEntities] = useState<NanoDiscoveredEntity[]>([]);
   const [scanningNano, setScanningNano] = useState(false);
+  const [nanoScanCompleted, setNanoScanCompleted] = useState(false);
   const [nanoScanNotice, setNanoScanNotice] = useState<string | null>(null);
   const [nanoScanTruncated, setNanoScanTruncated] = useState(false);
   const [nanoScanTimedOut, setNanoScanTimedOut] = useState(false);
@@ -358,6 +359,7 @@ export default function App() {
         setAiDiscoveredEntities(remaining);
       }
     }
+    setNanoScanCompleted(false);
     setNanoScanNotice(null);
     setNanoScanTruncated(false);
     setNanoScanTimedOut(false);
@@ -371,6 +373,7 @@ export default function App() {
     nanoEntitiesRef.current = [];
     setRunning(false);
     setScanningNano(false);
+    setNanoScanCompleted(false);
     setNanoScanNotice(null);
     setNanoScanTruncated(false);
     setNanoScanTimedOut(false);
@@ -391,6 +394,7 @@ export default function App() {
   const handleToggleCategory = useCallback((key: PiiCategory) => {
     nanoScanAbortRef.current?.abort();
     nanoScannedTextRef.current = null;
+    setNanoScanCompleted(false);
     setNanoScanNotice(null);
     setNanoScanTruncated(false);
     setNanoScanTimedOut(false);
@@ -438,7 +442,9 @@ export default function App() {
 
       const discovered = localScan.entities;
       nanoEntitiesRef.current = discovered;
-      nanoScannedTextRef.current = !localScan.timedOut && localScan.usedNano ? rawText : null;
+      const scanDone = !localScan.timedOut && localScan.usedNano;
+      nanoScannedTextRef.current = scanDone ? rawText : null;
+      setNanoScanCompleted(scanDone);
       setAiDiscoveredEntities(discovered);
       setNanoScanTruncated(localScan.truncated && localScan.scannedChars > 0);
       setNanoScanTimedOut(localScan.timedOut);
@@ -463,6 +469,7 @@ export default function App() {
     nanoEntitiesRef.current = [];
     setRunning(false);
     setScanningNano(false);
+    setNanoScanCompleted(false);
     setNanoScanNotice(null);
     setNanoScanTruncated(false);
     setNanoScanTimedOut(false);
@@ -582,7 +589,9 @@ export default function App() {
           if (controller.signal.aborted) return;
           discovered = localScan.entities;
           nanoEntitiesRef.current = discovered;
-          nanoScannedTextRef.current = !localScan.timedOut && localScan.usedNano ? rawText : null;
+          const scanDone = !localScan.timedOut && localScan.usedNano;
+          nanoScannedTextRef.current = scanDone ? rawText : null;
+          setNanoScanCompleted(scanDone);
           setAiDiscoveredEntities(discovered);
           setNanoScanTruncated(localScan.truncated && localScan.scannedChars > 0);
           setNanoScanTimedOut(localScan.timedOut);
@@ -625,13 +634,16 @@ export default function App() {
             ? new TextEncoder().encode(prompt).length
             : prompt.length;
         const imgBytes = attachedImage ? Math.round((attachedImage.base64Data.length * 3) / 4) : 0;
-        const bytesSentToCloud = aiRes.inferenceSource === 'ON_DEVICE' ? 0 : promptBytes + imgBytes;
-        const rawPiiBytesSent =
-          aiRes.inferenceSource === 'ON_DEVICE'
-            ? 0
-            : computeRawPiiBytes(
-                findLeakedOriginals(finalRedaction.redactedText, finalRedaction.vault)
-              );
+        const isLocalOnlyRun =
+          aiRes.inferenceSource === 'ON_DEVICE' ||
+          Boolean(aiRes.nanoUnavailable || aiRes.wasMockEcho) ||
+          effectiveMode === 'ONLY_ON_DEVICE';
+        const bytesSentToCloud = isLocalOnlyRun ? 0 : promptBytes + imgBytes;
+        const rawPiiBytesSent = isLocalOnlyRun
+          ? 0
+          : computeRawPiiBytes(
+              findLeakedOriginals(finalRedaction.redactedText, finalRedaction.vault)
+            );
 
         setResult(aiRes);
         setRunMetrics({
@@ -688,7 +700,7 @@ export default function App() {
 
   const handleSendFollowUp = useCallback(
     async (rawQuestion: string) => {
-      if (!result || isHistoricalView || !rawQuestion.trim()) return;
+      if (!result || isHistoricalView || result.nanoUnavailable || result.wasMockEcho || !rawQuestion.trim()) return;
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -756,6 +768,13 @@ export default function App() {
         );
 
         if (!controller.signal.aborted) {
+          if (aiRes.nanoUnavailable || aiRes.wasMockEcho) {
+            setFollowUpStreaming('');
+            setErrorMsg(
+              "Local Gemini Nano isn't downloaded in this browser yet. Switch to Fast Cloud to ask follow-up questions."
+            );
+            return;
+          }
           setFollowUps((prev) => [
             ...prev,
             {
@@ -797,14 +816,14 @@ export default function App() {
   );
 
   const handleCopyReport = useCallback(async () => {
-    if (!displayedMarkdown) return;
+    if (!displayedMarkdown || result?.nanoUnavailable || result?.wasMockEcho) return;
     await navigator.clipboard.writeText(displayedMarkdown);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
-  }, [displayedMarkdown]);
+  }, [displayedMarkdown, result?.nanoUnavailable, result?.wasMockEcho]);
 
   const handleExportMarkdown = useCallback(async () => {
-    if (!displayedMarkdown) return;
+    if (!displayedMarkdown || result?.nanoUnavailable || result?.wasMockEcho) return;
     const snapshotPayloadText = runMetrics?.sentPayloadText ?? redaction.redactedText;
     const snapshotVaultCount = runMetrics?.sentVaultCount ?? combinedVault.length;
     const snapshotBytesShielded = runMetrics?.sentBytesShielded ?? redaction.bytesShielded;
@@ -869,7 +888,7 @@ export default function App() {
   ]);
 
   const handleSaveToFirestore = useCallback(async () => {
-    if (!result || isHistoricalView) return;
+    if (!result || isHistoricalView || result.nanoUnavailable || result.wasMockEcho) return;
     setSavingHistory(true);
     setSavedNotice(null);
     try {
@@ -1089,6 +1108,7 @@ export default function App() {
             onRemoveManualTerm={handleRemoveManualTerm}
             nanoStatus={nanoChecked ? nanoStatus : 'checking'}
             scanningNano={scanningNano}
+            nanoScanCompleted={nanoScanCompleted}
             nanoScanNotice={nanoScanNotice}
             nanoScanTruncated={nanoScanTruncated}
             nanoScanTimedOut={nanoScanTimedOut}
@@ -1135,6 +1155,7 @@ export default function App() {
               onCopyReport={handleCopyReport}
               onExportMarkdown={handleExportMarkdown}
               onQuickStart={handleRunPipeline}
+              onSwitchToFastCloud={() => handleQuickModeChange('PREFER_IN_CLOUD')}
               followUps={followUps}
               followUpStreaming={followUpStreaming}
               followUpRunning={followUpRunning}

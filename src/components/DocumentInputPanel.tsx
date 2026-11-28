@@ -55,6 +55,7 @@ interface DocumentInputPanelProps {
   onRemoveManualTerm: (term: string) => void;
   nanoStatus: NanoAvailability | 'checking';
   scanningNano: boolean;
+  nanoScanCompleted: boolean;
   nanoScanNotice: string | null;
   nanoScanTruncated: boolean;
   nanoScanTimedOut: boolean;
@@ -138,6 +139,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     onRemoveManualTerm,
     nanoStatus,
     scanningNano,
+    nanoScanCompleted,
     nanoScanNotice,
     nanoScanTruncated,
     nanoScanTimedOut,
@@ -644,8 +646,18 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
             <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3.5 pb-4 font-mono text-[12px] leading-relaxed text-[var(--n-text)]">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 font-sans text-[12px] font-medium text-[var(--n-muted)]">
                 <span>Exact network payload (0 detected PII included):</span>
-                <span className="rounded bg-[var(--n-bg)] px-2 py-0.5 text-[11px] text-[var(--n-text)]">
-                  {redaction.sourceCounts.nano} {redaction.sourceCounts.nano === 1 ? 'entity' : 'entities'} found on-device by Gemini Nano
+                <span className="rounded bg-[var(--n-bg)] px-2 py-0.5 text-[11px] text-[var(--n-muted)]">
+                  {nanoScanCompleted ? (
+                    <span className="text-[var(--n-text)]">
+                      {redaction.sourceCounts.nano}{' '}
+                      {redaction.sourceCounts.nano === 1 ? 'entity' : 'entities'} found on-device by
+                      Gemini Nano
+                    </span>
+                  ) : nanoStatus === 'available' ? (
+                    'Nano scan not run yet'
+                  ) : (
+                    'Nano scan not run (model not downloaded)'
+                  )}
                 </span>
               </div>
               <pre className="whitespace-pre-wrap break-words">{outgoingPrompt}</pre>

@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { VaultEntry } from '../services/piiVault';
 
@@ -41,6 +41,27 @@ interface TokenChipProps {
 const InteractiveTokenChip: React.FC<TokenChipProps> = memo(
   ({ token, vaultLookup, isHistorical }) => {
     const [peek, setPeek] = useState(false);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+
+    useEffect(() => {
+      if (!peek) return;
+      const onPointerDown = (e: PointerEvent) => {
+        if (buttonRef.current && !buttonRef.current.contains(e.target as Node)) {
+          setPeek(false);
+        }
+      };
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          setPeek(false);
+        }
+      };
+      document.addEventListener('pointerdown', onPointerDown);
+      document.addEventListener('keydown', onKeyDown);
+      return () => {
+        document.removeEventListener('pointerdown', onPointerDown);
+        document.removeEventListener('keydown', onKeyDown);
+      };
+    }, [peek]);
 
     if (isHistorical) {
       return (
@@ -71,6 +92,7 @@ const InteractiveTokenChip: React.FC<TokenChipProps> = memo(
 
     return (
       <button
+        ref={buttonRef}
         type="button"
         translate="no"
         onClick={() => setPeek((v) => !v)}

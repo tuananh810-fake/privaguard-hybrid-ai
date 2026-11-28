@@ -20,7 +20,7 @@ npm run dev
 ```
 Open `http://localhost:5173`. If Firebase App Check blocks requests on `localhost`, open **Settings (Tech Drawer)** in the top-right corner and paste your App Check Debug Token.
 
-To run the full local verification suite (typecheck, 20 unit tests, regex accuracy eval, 1,000-doc stress test, and production build):
+To run the full local verification suite (typecheck, 21 unit tests, regex accuracy eval, 1,000-doc stress test, and production build):
 ```bash
 npm run verify
 ```

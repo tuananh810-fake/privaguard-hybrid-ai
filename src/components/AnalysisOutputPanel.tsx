@@ -59,6 +59,7 @@ interface AnalysisOutputPanelProps {
   onCopyReport: () => void;
   onExportMarkdown: () => void;
   onQuickStart: () => void;
+  onSwitchToFastCloud: () => void;
   followUps: FollowUpMessage[];
   followUpStreaming: string;
   followUpRunning: boolean;
@@ -278,25 +279,29 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
     onCopyReport,
     onExportMarkdown,
     onQuickStart,
+    onSwitchToFastCloud,
     followUps,
     followUpStreaming,
     followUpRunning,
     onSendFollowUp,
   }) => {
     const [question, setQuestion] = useState('');
-    const effectiveRehydrate = rehydrate && !isHistoricalView;
-    const effectiveVaultLookup = isHistoricalView ? undefined : vaultLookup;
+    const isNanoUnavailable = Boolean(result?.nanoUnavailable || result?.wasMockEcho);
+    const effectiveRehydrate = rehydrate && !isHistoricalView && !isNanoUnavailable;
+    const effectiveVaultLookup = isHistoricalView || isNanoUnavailable ? undefined : vaultLookup;
 
     const riskBanner = useMemo(
       () =>
-        !result?.structuredAudit && displayedMarkdown ? extractRiskBanner(displayedMarkdown) : null,
-      [result?.structuredAudit, displayedMarkdown]
+        !isNanoUnavailable && !result?.structuredAudit && displayedMarkdown
+          ? extractRiskBanner(displayedMarkdown)
+          : null,
+      [isNanoUnavailable, result?.structuredAudit, displayedMarkdown]
     );
 
     function handleFollowUpSubmit(e: React.FormEvent) {
       e.preventDefault();
       const q = question.trim();
-      if (!q || followUpRunning || running || isHistoricalView) return;
+      if (!q || followUpRunning || running || isHistoricalView || isNanoUnavailable) return;
       setQuestion('');
       onSendFollowUp(q);
     }
@@ -309,20 +314,27 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
 
           {result && (
             <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--n-muted)]">
-              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-0.5 font-medium text-[var(--n-text)]">
-                {result.inferenceSource === 'ON_DEVICE' ? (
-                  <Cpu className="h-3.5 w-3.5 text-[var(--n-accent)]" />
-                ) : (
-                  <Cloud className="h-3.5 w-3.5 text-[var(--n-accent)]" />
-                )}
-                {formatEngineLabel(result)}
-              </span>
-              {result.cached && (
+              {isNanoUnavailable ? (
+                <span className="inline-flex items-center gap-1 rounded-md border border-[var(--n-warn-border)] bg-[var(--n-warn-soft)] px-2 py-0.5 font-medium text-[var(--n-warn)]">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Nano unavailable
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-md border border-[var(--n-border)] bg-[var(--n-surface)] px-2 py-0.5 font-medium text-[var(--n-text)]">
+                  {result.inferenceSource === 'ON_DEVICE' ? (
+                    <Cpu className="h-3.5 w-3.5 text-[var(--n-accent)]" />
+                  ) : (
+                    <Cloud className="h-3.5 w-3.5 text-[var(--n-accent)]" />
+                  )}
+                  {formatEngineLabel(result)}
+                </span>
+              )}
+              {!isNanoUnavailable && result.cached && (
                 <span className="rounded bg-[var(--n-accent-soft)] px-1.5 py-0.5 text-[var(--n-accent)]">
                   Cached
                 </span>
               )}
-              {result.fallbackUsed && (
+              {!isNanoUnavailable && result.fallbackUsed && (
                 <span className="rounded bg-[var(--n-warn-soft)] px-1.5 py-0.5 text-[var(--n-warn)]">
                   Lite fallback
                 </span>
@@ -353,21 +365,23 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
             <div className="min-w-0">
               <div className="text-[11px] text-[var(--n-muted)]">Engine</div>
               <div className="truncate font-medium text-[var(--n-text)]">
-                {result.inferenceSource === 'ON_DEVICE'
-                  ? 'Device (Nano)'
-                  : result.modelUsed.replace(/\s*\(Cloud\)\s*$/i, '').trim()}
+                {isNanoUnavailable
+                  ? 'Nano unavailable'
+                  : result.inferenceSource === 'ON_DEVICE'
+                    ? 'Device (Nano)'
+                    : result.modelUsed.replace(/\s*\(Cloud\)\s*$/i, '').trim()}
               </div>
             </div>
             <div className="min-w-0">
               <div className="text-[11px] text-[var(--n-muted)]">Latency</div>
               <div className="font-mono font-medium tabular-nums text-[var(--n-text)]">
-                {formatDuration(result.latencyMs)}
+                {isNanoUnavailable ? '—' : formatDuration(result.latencyMs)}
               </div>
             </div>
             <div className="min-w-0">
               <div className="text-[11px] text-[var(--n-muted)]">TTFT</div>
               <div className="font-mono font-medium tabular-nums text-[var(--n-text)]">
-                {formatDuration(result.ttftMs)}
+                {isNanoUnavailable ? '—' : formatDuration(result.ttftMs)}
               </div>
             </div>
             <div className="min-w-0">
@@ -417,11 +431,40 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
           </div>
         )}
 
-        {/* Mock Nano Notice */}
-        {result?.wasMockEcho && (
-          <div className="mb-3 shrink-0 rounded-lg border border-[var(--n-warn-border)] bg-[var(--n-warn-soft)] p-3.5 text-[13px] text-[var(--n-warn)]">
-            Local Gemini Nano isn&apos;t downloaded in this browser yet. Choose{' '}
-            <strong>Fast Cloud</strong> in the Mode bar (or turn off Offline mode) for live analysis.
+        {/* Honest On-Device Nano Unavailable Notice (suppresses Chromium mock echo) */}
+        {isNanoUnavailable && (
+          <div
+            role="status"
+            className="mb-3 shrink-0 rounded-lg border border-[var(--n-warn-border)] bg-[var(--n-warn-soft)] p-4 text-[13.5px] text-[var(--n-warn)]"
+          >
+            <div className="mb-1.5 flex items-center gap-1.5 font-semibold">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              On-device Gemini Nano is not downloaded in this browser
+            </div>
+            <p className="leading-relaxed">
+              Strict Offline blocked all outbound cloud traffic (<strong>0 B</strong> sent to cloud).
+              Choose <strong>Fast Cloud</strong> to analyze masked tokens in the cloud, or enable
+              Chrome Built-in AI to run fully offline on-device.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={onSwitchToFastCloud}
+                className="inline-flex items-center gap-1.5 rounded-md bg-[var(--n-accent)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--n-accent-fg)] transition hover:bg-[var(--n-accent-hover)]"
+              >
+                <Cloud className="h-3.5 w-3.5" />
+                Switch to Fast Cloud
+              </button>
+              <a
+                href="https://developer.chrome.com/docs/ai/built-in"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-[var(--n-warn-border)] bg-[var(--n-bg)] px-2.5 py-1.5 text-[12.5px] font-medium text-[var(--n-text)] transition hover:bg-[var(--n-hover)]"
+              >
+                How to enable Gemini Nano
+                <ArrowRight className="h-3.5 w-3.5" />
+              </a>
+            </div>
           </div>
         )}
 
@@ -442,7 +485,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
 
         {/* Main Editorial Reading Area */}
         <div className="min-h-0 flex-1 overflow-y-auto pb-3">
-          {result?.structuredAudit ? (
+          {isNanoUnavailable ? null : result?.structuredAudit ? (
             <>
               <StructuredAuditView
                 report={result.structuredAudit}
@@ -517,7 +560,7 @@ export const AnalysisOutputPanel: React.FC<AnalysisOutputPanelProps> = memo(
         </div>
 
         {/* Quiet Ghost Action Bar + Notion AI Follow-up Input */}
-        {result && (
+        {result && !isNanoUnavailable && (
           <div className="mt-4 shrink-0 space-y-3 border-t border-[var(--n-border)] pt-3">
             {savedNotice && (
               <div
