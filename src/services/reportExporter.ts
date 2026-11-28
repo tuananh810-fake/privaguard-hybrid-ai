@@ -76,6 +76,19 @@ async function computeSha256Hex(text: string): Promise<string> {
   return 'unavailable';
 }
 
+function buildShadedRunsXml(text: string): string {
+  const parts = text.split(/(\[[A-Z]+_\d+\])/g).filter((p) => p.length > 0);
+  if (parts.length === 0) return '<w:r><w:t></w:t></w:r>';
+  return parts
+    .map((part) => {
+      if (/^\[[A-Z]+_\d+\]$/.test(part)) {
+        return `<w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/><w:shd w:val="clear" w:color="auto" w:fill="18181B"/></w:rPr><w:t xml:space="preserve"> ${encodeXml(part)} </w:t></w:r>`;
+      }
+      return `<w:r><w:t xml:space="preserve">${encodeXml(part)}</w:t></w:r>`;
+    })
+    .join('');
+}
+
 function buildDocxParagraphXml(line: string): string {
   const trimmed = line.trim();
   if (!trimmed) {
@@ -92,7 +105,7 @@ function buildDocxParagraphXml(line: string): string {
   const clean = stripMarkdownSyntax(trimmed);
   const isBullet = /^[-*]\s+/.test(trimmed);
   const text = isBullet ? `• ${clean.replace(/^[-*]\s+/, '')}` : clean;
-  return `<w:p><w:r><w:t xml:space="preserve">${encodeXml(text)}</w:t></w:r></w:p>`;
+  return `<w:p>${buildShadedRunsXml(text)}</w:p>`;
 }
 
 /**
@@ -342,7 +355,18 @@ export async function exportAnalysisReport(
   }
 
   // format === 'pdf'
-  const bytes = await buildCleanPdfBytes(`PrivaGuard AI Report (${input.task})`, fullMarkdown);
+  let bytes: Uint8Array;
+  if (typeof document !== 'undefined') {
+    const { renderStructuredTextToPdfBytes } = await import('./richPdfRenderer.ts');
+    bytes = await renderStructuredTextToPdfBytes(
+      'md',
+      fullMarkdown,
+      `PrivaGuard AI Report (${input.task})`,
+      input.vaultCount
+    );
+  } else {
+    bytes = await buildCleanPdfBytes(`PrivaGuard AI Report (${input.task})`, fullMarkdown);
+  }
   const mimeType = 'application/pdf';
   return {
     blob: new Blob([bytes.buffer as ArrayBuffer], { type: mimeType }),

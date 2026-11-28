@@ -1,4 +1,4 @@
-# PrivaGuard AI (v6.3)
+# PrivaGuard AI (v7.1)
 
 > **Use cloud AI on confidential docs — secrets never leave your browser.**
 
@@ -8,7 +8,8 @@
 [![Demo Video](https://img.shields.io/badge/Demo%20Video-YouTube%20(2%3A21)-FF0000?style=flat-square&logo=youtube&logoColor=white)](https://youtu.be/RKsPo-4NGts)
 [![Built for](https://img.shields.io/badge/Hackathon-%23BuildHybridAI%202026-37352F?style=flat-square)](https://buildhybridai.devpost.com/)
 [![Firebase AI Logic](https://img.shields.io/badge/Firebase%20AI%20Logic-Hybrid%20Nano%20%2B%20Gemini%203.6%20Flash-DD2C00?style=flat-square)](https://firebase.google.com/docs/ai-logic)
-[![Tests](https://img.shields.io/badge/Unit%20Tests-23%2F23%20PASS-0F7B6C?style=flat-square)](#benchmarks--verification)
+[![Tests](https://img.shields.io/badge/Unit%20Tests-37%2F37%20PASS-0F7B6C?style=flat-square)](#benchmarks--verification)
+[![Context Eval](https://img.shields.io/badge/Context%20Eval-42%2F42%20(100%25)-0F7B6C?style=flat-square)](#benchmarks--verification)
 
 **Live App:** https://buildhybridai-tuananh.web.app · **Demo Video (2:21):** https://youtu.be/RKsPo-4NGts · **User Guide:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) · **Devpost Pack:** [DEVPOST_SUBMISSION.md](DEVPOST_SUBMISSION.md)
 
@@ -37,7 +38,7 @@
 |---|---|---|---|
 | **Cloud-only** | Fails — raw API keys, CCCD/SSN, client names, and addresses must leave the browser first | Strong frontier structured audits | No |
 | **On-device-only** | Safe — raw text stays local | Limited context & weaker multi-framework JSON audits | Yes |
-| **PrivaGuard Hybrid** (`Nano` local semantic PII + `Cloud` reasoning on tokens) | **0 detected PII sent to cloud** — regex + on-device Gemini Nano + manual marks shield locally before anything leaves RAM | **Frontier Cloud Gemini 3.6 Flash** reasons over safe `[TOKEN_N]` placeholders and re-hydrates locally | **Yes** — PWA app shell (`privaguard-shell-v6.3.2`) + `ONLY_ON_DEVICE` Gemini Nano (`0 B` to cloud) |
+| **PrivaGuard Hybrid** (`Nano` local semantic PII + `Cloud` reasoning on tokens) | **0 detected PII sent to cloud** — regex + 3-Tier Context Guard + on-device Gemini Nano + manual marks shield locally before anything leaves RAM | **Frontier Cloud Gemini 3.6 Flash** reasons over safe `[TOKEN_N]` placeholders and re-hydrates locally | **Yes** — PWA app shell (`privaguard-shell-v7.1.0`) + `ONLY_ON_DEVICE` Gemini Nano (`0 B` to cloud) |
 
 ---
 
@@ -73,15 +74,17 @@ flowchart LR
 
 ---
 
-## What's New in v6.3
+## What's New in v7.1 (Document-First Visual Redaction Studio & MV3 Extension)
 
-- **30 s Manual / 12 s Auto Nano Timeouts, Live Cancel & Honest Timeout Status:** Cold-start and multi-page on-device Gemini Nano scans get a **30 s** budget on manual **Scan semantic PII (Nano)**, **12 s** on automatic pre-analysis discovery, and **5 s** on follow-up questions — paired with a **Cancel** button during active scans and honest timeout notices (`Nano timed out (Ns) · retry scan or mark names manually` or `kept N partial entities`) instead of misleading `"0 new entities"` text. Timed-out scans are never cached as complete.
-- **8 s Cloud TTFT Fallback + 5-Minute Cooldown & On-Device Quota Trimming:** If a primary cloud model (`gemini-3.6-flash`) stalls or hits HTTP 429, **Fast Cloud** immediately falls back to `gemini-3.5-flash-lite` (`Lite fallback` badge, ~3.3 s typed Risk Card) and caches a **5-minute** session cooldown so subsequent requests route straight to Lite. In **Strict Offline** mode, oversized documents automatically excerpt locally instead of throwing Chrome Prompt API `QuotaExceededError` (`0 B` sent to cloud).
-- **Inline Hybrid Mode Pill & Slide-Over History Drawer:** Switch directly between `Auto Hybrid | Fast Cloud | Strict Offline` in the workspace action bar, inspect saved Firestore snapshots via the top-bar **`History`** slide-over drawer (clean `1.4s` duration formatting, `Escape` close, WCAG-compliant sibling controls), and keep the entire split-pane above the fold at `1280×720` and `1920×1080`.
-- **Immediate Abort During TTFT:** Stream open, chunk iteration, and fallback model calls race against `AbortSignal` (`raceWithAbort`), so clicking **Stop** cancels immediately even while waiting for the first token.
-- **One-Command Verification (`npm run verify`):** Runs `typecheck`, `test` (**23/23**), `eval` (52 EN+VI samples), `stress` (1,000 docs), and production `build` in one command.
-- **Hosting Security Headers & PWA v6.3.2:** Added `X-Frame-Options: SAMEORIGIN` alongside `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`, `no-cache` on `/`, `/index.html`, and `/sw.js`, `robots.txt` / `sitemap.xml`, and upgraded the Service Worker cache to `privaguard-shell-v6.3.2`.
-- **v6.2 Foundations Retained:** Honest Nano truncation coverage (`scannedChars / totalChars` across 5,160-char budget), read-only **Anonymized Cloud Snapshot** mode in History, follow-up Nano scanning, immutable SHA-256 `.md` proofs, `sanitizeAnalysisPayload` Firestore clamping, `Mark as sensitive` (`Ctrl/Cmd+Shift+M`), `unknown token` chips, `eng+vie` Auto-OCR image redaction, and full PWA/OG assets.
+- **Document-First Native Visual Preview (`DocumentPreviewPane.tsx`):** Uploading `.pdf`, `.docx`, `.csv`, `.json`, `.md`, `.env`/`.log`/`.txt`, or images automatically opens the **`Preview`** tab in its authentic layout (multi-page PDF canvas, styled A4 Word document with headings/tables/images, RFC-4180 CSV table, formatted JSON, rendered Markdown, or line-numbered viewer).
+- **Dual-Mode Visual Leak Inspector (`Highlight leaks` ↔ `Redacted preview`):** Inspect exact exposed strings directly on the original document layout with source badges (`regex`/`Nano`/`manual`), click any leak to **Keep visible (Whitelist)** for the current session (`ignoredValues`), highlight text to **Mark as sensitive** (`Ctrl/Cmd+Shift+M`), or toggle **`Draw mask`** to drag custom redaction boxes over signatures, stamps, or scanned areas on PDF pages.
+- **Format-Preserving & Cross-Format Redacted Export (100% in Browser RAM):**
+  - **Same-format:** `.pdf → .pdf` (2x DPI visual burn-in of vault + manual boxes, 0 hidden text, stripped metadata), `.docx → .docx` (in-place OpenXML run-merging across `document`, `header*`, `footer*`, `footnotes`, `endnotes`, `comments.xml` + scrubbed `core.xml`/`app.xml` + shaded `[TOKEN_N]` runs), `.csv → .csv` (RFC-4180 cell-safe), `.json → .json` (AST syntax-safe).
+  - **Cross-format (`DOCX / CSV / MD / JSON → Redacted PDF` & `Any → DOCX`):** Pure Canvas 2x DPI A4 renderer (`richPdfRenderer.ts`, zero extra deps) preserves Word tables, headings, lists, embedded images, and **full Vietnamese Unicode diacritics** with solid-black `[TOKEN_N]` pills, 0 hidden text, and stripped metadata.
+- **3-Tier Context-Aware Sensitivity Engine (`sensitivityEngine.ts`):** Distinguishes real confidential secrets/PII from Cisco/lab/tutorial/public examples (`42/42` EN+VI context eval, `0.062 ms/doc`) while enforcing a **`MIXED_HYBRID` hard-secret invariant** so live credentials are always masked.
+- **Cloud Model Selector, Cache Isolation & Multi-Format Reports:** Choose `Auto` / `Gemini 3.6 Flash` / `Gemini 3.5 Flash-Lite`, prevent fallback responses from poisoning primary model caches (`12 s` TTFT timeout + `90 s` cooldown + `Retry 3.6 Flash`), and export Audit Reports as `.pdf`, `.docx`, `.md`, `.json`, or `.txt`.
+- **Chrome Extension Companion (Manifest V3 in `extension/`):** Shadow DOM Shield Bar for ChatGPT, Claude, and Gemini — intercepts pastes and file uploads (`<input type="file">` / drag-drop `DataTransfer` swap + Offscreen Document for CSP-free `.pdf` redaction) sharing the exact pure TypeScript core (`piiVault`, `sensitivityEngine`, `lightFileRedactor`).
+- **PWA Instant-Update Lifecycle (`privaguard-shell-v7.1.0`):** `src/main.tsx` detects newly activated Service Workers and shows a clean `"Update ready · Reload"` pill so returning users never stay stuck on stale cached bundles.
 
 ---
 
@@ -128,12 +131,13 @@ Measured by `npm run eval` (`node scripts/eval-pii.ts`) across **52 synthetic EN
 
 | Verification Suite | Real Measured Result |
 |---|---|
-| **Full Gate (`npm run verify`)** | Runs `typecheck` + `test` + `eval` + `stress` + `build` end-to-end |
-| **Unit Tests** (`npm test`) | **23/23 PASS** (JWT, PEM, DB URI, CCCD, VN/US phones & VN landline `028-3822-1234`, `999.999.999.999`, `v1.2.3.4`, `1.2.3.4-rc1`, case-insensitive terms, Follow-up vault continuation, `parseStructuredAudit`, `ocrPiiMatcher` EN + VI diacritics, `documentParser`, `nanoEntityDiscovery` anti-hallucination, chunk truncation, 30s/12s timeouts & `AbortController` cancel distinction, 8s Cloud TTFT timeout + 5m cooldown bypass, `shouldApplyCloudTtftTimeout` Auto Hybrid guard, `shouldEmitStreamChunk` JSON-vs-Markdown & mock-echo stream guard, `isMockNanoEcho` & `sanitizeNanoResult` Chromium stub guard, 2–3 char word-boundary leak check, unknown token audit, prompt-injection defense, exact UTF-8 `rawPiiBytesSent`, `sanitizeAnalysisPayload` Firestore clamping) |
+| **Full Gate (`npm run verify` + Extension CI)** | Runs `typecheck` + `test` + `eval` + `eval:context` + `stress` + `build` + strict Extension `tsc` + `build:extension` |
+| **Unit Tests** (`npm test`) | **37/37 PASS** (Regex/Nano/Manual vault, 3-Tier Context Guard, `ignoredValues` whitelist, in-place DOCX `document`/`header`/`footer`/`comments`/`core`/`app` + visual token shading, RFC-4180 CSV, AST JSON, visual PDF + `manualBoxes`, cross-format `DOCX → PDF` & `CSV → PDF`, XSS HTML sanitization, model cache isolation, layout-aware PDF reconstruction, prompt-injection defense, exact UTF-8 `rawPiiBytesSent`, Firestore payload clamping) |
 | **Regex Accuracy Eval** (`npm run eval`) | **Precision 100.0% · Recall 100.0% · F1 100.0%** across 52 EN+VI samples (**11/11** decoys clean) |
-| **Concurrency Stress Test** (`npm run stress`) | **1,000 docs in 240 ms** (`0.240 ms/doc`) · **5,000 secrets** · **0 detected leaks** · **0 mismatches** |
-| **Bundle Discipline** (`npm run build`) | `index.js`: **160.41 kB** (`45.33 kB` gzip, ≤ 55 kB budget) · `remote-config`, `nanoEntityDiscovery`, `pdfjs-dist`, `mammoth`, `tesseract.js`, `firestore` all strictly lazy-loaded |
-| **Live Production QA (`https://buildhybridai-tuananh.web.app`)** | Deployed as `index-CDJQZLO1.js` (HTTP `200`, `X-Frame-Options: SAMEORIGIN`, valid `robots.txt` & `sitemap.xml`, `privaguard-shell-v6.3.2`): verified live on **Chrome Desktop with Gemini Nano (`available`)** — `nda-sample.pdf` 2-page local extract + live on-device Nano discovery (**6** semantic `PERSON`/`ORG`/`ADDRESS` entities, `rx 11 · Na 6 · man 0`), **Fast Cloud** Risk Card (`3.3s`, `High · Score 85/100`, `Lite fallback`, `Raw PII bytes sent: 0 B`) + RAM `Show real names` + Firestore `Save` & read-only `History` snapshot, Auto-OCR (`3` black boxes), and **true browser offline** Strict Offline (`● Offline · On-device`, `Ran on: Device (Nano)`, `1.2s` TTFT, `Bytes to cloud: 0 B`, `Raw PII bytes sent: 0 B`). |
+| **Context-Aware Eval** (`npm run eval:context`) | **42/42 (100.0%) Context · 41/41 (100.0%) Secret Recall · 48/48 (100.0%) Benign Preservation · `0.062 ms/doc`** |
+| **Concurrency Stress Test** (`npm run stress`) | **1,000 docs in 265 ms** (`0.265 ms/doc`) · **5,000 secrets** · **0 detected leaks** · **0 mismatches** |
+| **Bundle Discipline** (`npm run build` + `build:extension`) | Web initial `index.js`: **~53.98 kB gzip** (`<= 55 kB` budget) · Previewers, `richPdfRenderer`, `fileRedactor`, `pdfjs-dist`, `pdf-lib`, `mammoth`, `jszip`, `tesseract.js`, `firestore` all strictly lazy-loaded · Extension `background.js` `9.8 kB` |
+| **Chrome Extension (MV3)** | Build with `npm run build:extension` → load `extension/dist` via `chrome://extensions` (`Developer mode` → `Load unpacked`) |
 
 ---
 

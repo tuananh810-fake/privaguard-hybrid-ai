@@ -19,12 +19,12 @@ import {
 import { SAMPLE_DOCUMENTS } from '../data/samples';
 import { AnalysisTask, AttachedImage, ModeKey, NanoAvailability } from '../services/hybridAI';
 import { RedactionResult, VaultEntry } from '../services/piiVault';
-import type { SafeDocumentExportFormat } from '../services/fileRedactor';
+import type { ManualPdfBox, SafeDocumentExportFormat } from '../services/fileRedactor';
 import { HighlightedRedactedText } from './RichOutput';
 import { ExportMenuButton, ExportMenuOption } from './ExportMenuButton';
 
-const PdfPreviewPane = lazy(() =>
-  import('./PdfPreviewPane').then((m) => ({ default: m.PdfPreviewPane }))
+const DocumentPreviewPane = lazy(() =>
+  import('./DocumentPreviewPane').then((m) => ({ default: m.DocumentPreviewPane }))
 );
 
 export const TASK_OPTIONS: { key: AnalysisTask; label: string }[] = [
@@ -40,7 +40,7 @@ const QUICK_MODE_OPTIONS: { key: ModeKey; label: string; title: string }[] = [
   { key: 'ONLY_ON_DEVICE', label: 'Strict Offline', title: '100% on-device Gemini Nano (0 B to cloud)' },
 ];
 
-export type InputTabKey = 'original' | 'safe' | 'pages' | 'diff' | 'audit';
+export type InputTabKey = 'original' | 'safe' | 'preview' | 'diff' | 'audit';
 
 interface DocumentInputPanelProps {
   rawText: string;
@@ -68,6 +68,12 @@ interface DocumentInputPanelProps {
   manualTerms: string[];
   onAddManualTerm: (term: string) => void;
   onRemoveManualTerm: (term: string) => void;
+  ignoredValues?: string[];
+  onWhitelistValue?: (value: string) => void;
+  onRestoreWhitelisted?: (value: string) => void;
+  manualPdfBoxes?: ManualPdfBox[];
+  onAddManualBox?: (box: ManualPdfBox) => void;
+  onRemoveManualBox?: (id: string) => void;
   nanoStatus: NanoAvailability | 'checking';
   scanningNano: boolean;
   nanoScanCompleted: boolean;
@@ -159,6 +165,12 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     manualTerms,
     onAddManualTerm,
     onRemoveManualTerm,
+    ignoredValues = [],
+    onWhitelistValue,
+    onRestoreWhitelisted,
+    manualPdfBoxes = [],
+    onAddManualBox,
+    onRemoveManualBox,
     nanoStatus,
     scanningNano,
     nanoScanCompleted,
@@ -220,13 +232,10 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
     }
 
     const originalFileName = originalFile?.name ?? null;
-    const isPdfLoaded = Boolean(
-      originalFile &&
-        (originalFile.name.toLowerCase().endsWith('.pdf') || originalFile.type === 'application/pdf')
-    );
+    const originalFileExt = originalFileName?.split('.').pop()?.toLowerCase() || '';
 
     const safeDocExportOptions = useMemo<ExportMenuOption[]>(() => {
-      const ext = originalFileName?.split('.').pop()?.toLowerCase();
+      const ext = originalFileExt;
       const opts: ExportMenuOption[] = [];
       if (originalFileName && ext) {
         opts.push({
@@ -234,22 +243,33 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
           label: `Keep original (.${ext})`,
           hint:
             ext === 'pdf'
-              ? 'Visual redacted PDF · 0 hidden text'
+              ? 'Visual redacted PDF · 0 hidden text · incl. manual boxes'
               : ext === 'docx'
-                ? 'Preserve Word layout · metadata scrubbed'
-                : `Format-preserved safe-${originalFileName}`,
+                ? 'Word layout preserved · shaded tokens · metadata scrubbed'
+                : ext === 'csv'
+                  ? 'RFC-4180 cell-safe CSV · structure preserved'
+                  : `Format-preserved safe-${originalFileName}`,
           highlight: true,
         });
       }
       opts.push(
-        { id: 'pdf', label: 'Export as .pdf', hint: 'Clean redacted PDF (metadata stripped)' },
-        { id: 'docx', label: 'Export as .docx', hint: 'Editable Word document (safe tokens)' },
+        {
+          id: 'pdf',
+          label: 'Export as .pdf',
+          hint:
+            ext === 'docx'
+              ? 'Keeps Word layout & Unicode · black redaction bars · 0 hidden text'
+              : ext === 'csv'
+                ? 'Paginated redacted table PDF · 0 hidden text'
+                : 'Rich Unicode redacted PDF (0 hidden text · metadata stripped)',
+        },
+        { id: 'docx', label: 'Export as .docx', hint: 'Editable Word document (shaded safe tokens)' },
         { id: 'md', label: 'Export as .md', hint: 'Sanitized Markdown text' },
         { id: 'txt', label: 'Export as .txt', hint: 'Plain sanitized text for any AI' },
         { id: 'json', label: 'Export as .json', hint: 'Syntax-safe sanitized JSON' }
       );
       return opts;
-    }, [originalFileName]);
+    }, [originalFileName, originalFileExt]);
 
     function handleSelectSafeDocExport(formatId: string) {
       if (onExportSafeDocument) {
@@ -461,6 +481,21 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
         {/* Clean 2-Tab Bar + Subtle Diff/Payload Inspector Icons */}
         <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--n-border)] pb-2">
           <div className="flex items-center gap-1">
+            {originalFile && (
+              <button
+                type="button"
+                onClick={() => onInputTabChange('preview')}
+                title="View uploaded file in its original layout with leak highlights and redaction preview"
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
+                  inputTab === 'preview'
+                    ? 'bg-[var(--n-surface)] text-[var(--n-text)]'
+                    : 'text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]'
+                }`}
+              >
+                <FileText className="h-3.5 w-3.5 text-[var(--n-accent)]" />
+                Preview{originalFileExt ? ` (.${originalFileExt})` : ''}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onInputTabChange('original')}
@@ -470,7 +505,7 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
                   : 'text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]'
               }`}
             >
-              Document
+              {originalFile ? 'Text' : 'Document'}
             </button>
             <button
               type="button"
@@ -482,23 +517,8 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               }`}
             >
               <ShieldCheck className="h-3.5 w-3.5" />
-              Safe preview ({redaction.vault.length})
+              Safe preview ({redaction.vault.length + manualPdfBoxes.length})
             </button>
-            {isPdfLoaded && (
-              <button
-                type="button"
-                onClick={() => onInputTabChange('pages')}
-                title="Preview original PDF pages with exact redaction boxes"
-                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
-                  inputTab === 'pages'
-                    ? 'bg-[var(--n-surface)] text-[var(--n-text)]'
-                    : 'text-[var(--n-muted)] hover:bg-[var(--n-hover)] hover:text-[var(--n-text)]'
-                }`}
-              >
-                <FileText className="h-3.5 w-3.5" />
-                Pages
-              </button>
-            )}
           </div>
 
           <div className="flex items-center gap-1 text-[12px]">
@@ -792,19 +812,28 @@ export const DocumentInputPanel: React.FC<DocumentInputPanelProps> = memo(
               </div>
               <HighlightedRedactedText text={redaction.redactedText} vaultLookup={vaultLookup} />
             </div>
-          ) : inputTab === 'pages' && originalFile && isPdfLoaded ? (
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-              <Suspense
-                fallback={
-                  <div className="flex min-h-[180px] items-center justify-center gap-2 text-[13px] text-[var(--n-muted)]">
-                    <RefreshCw className="h-4 w-4 animate-spin text-[var(--n-accent)]" />
-                    Loading PDF preview…
-                  </div>
-                }
-              >
-                <PdfPreviewPane file={originalFile} vault={redaction.vault} />
-              </Suspense>
-            </div>
+          ) : inputTab === 'preview' && originalFile ? (
+            <Suspense
+              fallback={
+                <div className="flex min-h-[180px] items-center justify-center gap-2 text-[13px] text-[var(--n-muted)]">
+                  <RefreshCw className="h-4 w-4 animate-spin text-[var(--n-accent)]" />
+                  Rendering original document preview…
+                </div>
+              }
+            >
+              <DocumentPreviewPane
+                file={originalFile}
+                rawText={rawText}
+                vault={redaction.vault}
+                ignoredValues={ignoredValues}
+                manualPdfBoxes={manualPdfBoxes}
+                onAddManualBox={(b) => onAddManualBox?.(b)}
+                onRemoveManualBox={(id) => onRemoveManualBox?.(id)}
+                onAddManualTerm={onAddManualTerm}
+                onWhitelistValue={(v) => onWhitelistValue?.(v)}
+                onRestoreWhitelisted={(v) => onRestoreWhitelisted?.(v)}
+              />
+            </Suspense>
           ) : inputTab === 'diff' ? (
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto py-1.5 sm:grid-cols-2 sm:overflow-hidden">
               <div className="min-h-0 overflow-y-auto rounded-lg border border-[var(--n-border)] bg-[var(--n-surface)] p-3 pb-4 text-[13.5px] leading-relaxed">

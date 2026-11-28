@@ -89,6 +89,94 @@ export function redactJsonTextPreservingSyntax(
 }
 
 // ---------------------------------------------------------------------------
+// 1b. RFC-4180 Quote-Safe CSV Cell-Level Redactor
+// ---------------------------------------------------------------------------
+
+export function parseCsvRows(rawCsv: string): { rows: string[][]; delimiter: ',' | ';' } {
+  if (!rawCsv) return { rows: [], delimiter: ',' };
+  const firstLine = rawCsv.split(/\r?\n/, 1)[0] || '';
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semiCount = (firstLine.match(/;/g) || []).length;
+  const delimiter: ',' | ';' = semiCount > commaCount ? ';' : ',';
+
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < rawCsv.length; i++) {
+    const ch = rawCsv[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (rawCsv[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === delimiter) {
+      row.push(field);
+      field = '';
+    } else if (ch === '\r') {
+      if (rawCsv[i + 1] === '\n') i += 1;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else if (ch === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += ch;
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return { rows, delimiter };
+}
+
+function serializeCsvCell(value: string, delimiter: ',' | ';'): string {
+  if (
+    value.includes(delimiter) ||
+    value.includes('"') ||
+    value.includes('\n') ||
+    value.includes('\r')
+  ) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+export function redactCsvTextPreservingStructure(
+  rawCsv: string,
+  options: ContextGuardOptions = {}
+): {
+  redactedText: string;
+  analysis: ContextGuardAnalysis;
+  rows: string[][];
+  delimiter: ',' | ';';
+} {
+  const analysis = analyzeWithContextGuard(rawCsv, options);
+  const { rows, delimiter } = parseCsvRows(rawCsv);
+  const redactedRows = rows.map((row) =>
+    row.map((cell) => replaceWithVault(cell, analysis.activeVault))
+  );
+  const redactedText = redactedRows
+    .map((row) => row.map((cell) => serializeCsvCell(cell, delimiter)).join(delimiter))
+    .join('\n');
+  return { redactedText, analysis, rows: redactedRows, delimiter };
+}
+
+// ---------------------------------------------------------------------------
 // 2. Format-Preserving Word (.docx) OpenXML In-Place Redactor (Run-Merging)
 // ---------------------------------------------------------------------------
 
@@ -228,6 +316,36 @@ function applyVaultToDocxXml(xml: string, vault: VaultEntry[]): string {
   });
 }
 
+function highlightTokensInDocxRunXml(xml: string): string {
+  // Style any <w:r> containing a [TOKEN_N] placeholder cleanly by splitting token substrings
+  // into shaded bold white runs without altering surrounding non-token text styling.
+  const runRegex = /<w:r\b([^>]*)>([\s\S]*?)<\/w:r>/g;
+  const tokenSplitRegex = /(\[[A-Z]+_\d+\])/g;
+
+  return xml.replace(runRegex, (fullRun, runAttrs: string, runBody: string) => {
+    if (!/\[[A-Z]+_\d+\]/.test(runBody)) return fullRun;
+    const wtMatch = runBody.match(/^(\s*(?:<w:rPr>[\s\S]*?<\/w:rPr>)?\s*)(<w:t(?:\s+[^>]*)?>)([\s\S]*?)<\/w:t>(\s*)$/);
+    if (!wtMatch) return fullRun;
+
+    const rPrBlock = wtMatch[1] || '';
+    const openWt = wtMatch[2];
+    const decoded = decodeXmlEntities(wtMatch[3]);
+    const tail = wtMatch[4] || '';
+    const parts = decoded.split(tokenSplitRegex).filter((p) => p.length > 0);
+    if (parts.length === 0) return fullRun;
+
+    return parts
+      .map((part) => {
+        if (/^\[[A-Z]+_\d+\]$/.test(part)) {
+          return `<w:r${runAttrs}><w:rPr><w:b/><w:color w:val="FFFFFF"/><w:shd w:val="clear" w:color="auto" w:fill="18181B"/></w:rPr><w:t xml:space="preserve"> ${encodeXmlEntities(part)} </w:t></w:r>`;
+        }
+        const safeOpen = ensurePreserveSpaceTag(openWt, part);
+        return `<w:r${runAttrs}>${rPrBlock}${safeOpen}${encodeXmlEntities(part)}</w:t>${tail}</w:r>`;
+      })
+      .join('');
+  });
+}
+
 function scrubDocxCoreXml(coreXml: string): string {
   return coreXml
     .replace(/<dc:creator\b[^>]*>[\s\S]*?<\/dc:creator>/gi, '<dc:creator>PrivaGuard AI</dc:creator>')
@@ -235,6 +353,12 @@ function scrubDocxCoreXml(coreXml: string): string {
     .replace(/<dc:title\b[^>]*>[\s\S]*?<\/dc:title>/gi, '<dc:title></dc:title>')
     .replace(/<dc:subject\b[^>]*>[\s\S]*?<\/dc:subject>/gi, '<dc:subject></dc:subject>')
     .replace(/<dc:description\b[^>]*>[\s\S]*?<\/dc:description>/gi, '<dc:description></dc:description>');
+}
+
+function scrubDocxAppXml(appXml: string): string {
+  return appXml
+    .replace(/<Company\b[^>]*>[\s\S]*?<\/Company>/gi, '<Company></Company>')
+    .replace(/<Manager\b[^>]*>[\s\S]*?<\/Manager>/gi, '<Manager></Manager>');
 }
 
 function extractPlainTextFromDocxXml(xml: string): string {
@@ -250,7 +374,7 @@ function extractPlainTextFromDocxXml(xml: string): string {
 
 export async function redactDocxBuffer(
   buffer: ArrayBuffer | Uint8Array,
-  options: ContextGuardOptions = {}
+  options: ContextGuardOptions & { visualHighlightTokens?: boolean } = {}
 ): Promise<{
   bytes: Uint8Array;
   analysis: ContextGuardAnalysis;
@@ -262,7 +386,7 @@ export async function redactDocxBuffer(
   const zip = await JSZip.loadAsync(buffer);
 
   const xmlTargetPaths = Object.keys(zip.files).filter((p) =>
-    /^word\/(?:document|header\d*|footer\d*|footnotes|endnotes)\.xml$/i.test(p)
+    /^word\/(?:document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$/i.test(p)
   );
 
   const xmlContents = new Map<string, string>();
@@ -278,11 +402,15 @@ export async function redactDocxBuffer(
 
   const fullDocText = allTexts.join('\n\n');
   const analysis = analyzeWithContextGuard(fullDocText, options);
+  const visualHighlightTokens = options.visualHighlightTokens ?? true;
 
   let xmlFilesTouched = 0;
   for (const [path, content] of xmlContents.entries()) {
-    const updated = applyVaultToDocxXml(content, analysis.activeVault);
+    let updated = applyVaultToDocxXml(content, analysis.activeVault);
     if (updated !== content) {
+      if (visualHighlightTokens) {
+        updated = highlightTokensInDocxRunXml(updated);
+      }
       zip.file(path, updated);
       xmlFilesTouched += 1;
     }
@@ -294,6 +422,13 @@ export async function redactDocxBuffer(
     const coreXml = await coreEntry.async('string');
     const scrubbed = scrubDocxCoreXml(coreXml);
     zip.file('docProps/core.xml', scrubbed);
+    metadataStripped = true;
+  }
+  const appEntry = zip.file('docProps/app.xml');
+  if (appEntry) {
+    const appXml = await appEntry.async('string');
+    const scrubbed = scrubDocxAppXml(appXml);
+    zip.file('docProps/app.xml', scrubbed);
     metadataStripped = true;
   }
 

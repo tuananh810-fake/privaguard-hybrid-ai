@@ -8,7 +8,7 @@ on:
 
 jobs:
   verify:
-    name: Typecheck, Unit Tests, Eval, Stress & Build
+    name: Typecheck, Unit Tests, Eval, Stress, Web & Extension Build
     runs-on: ubuntu-latest
 
     steps:
@@ -24,5 +24,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run full verification gate
+      - name: Run full web verification gate
         run: npm run verify
+
+      - name: Typecheck Chrome Extension (strict)
+        run: npx tsc --ignoreConfig --noEmit --strict --allowImportingTsExtensions --target ES2022 --module ESNext --moduleResolution bundler --skipLibCheck extension/src/chrome.d.ts extension/src/background.ts extension/src/content.ts extension/src/editorAdapter.ts extension/src/fileInterceptor.ts extension/src/shieldBar.ts extension/src/offscreen.ts extension/src/popup.ts src/vite-env.d.ts
+
+      - name: Build Chrome Extension (MV3)
+        run: npm run build:extension

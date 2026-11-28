@@ -50,10 +50,13 @@ import {
 import {
   exportSanitizedDocumentAs,
   matchPdfTextItemsToVault,
+  redactCsvTextPreservingStructure,
   redactDocxBuffer,
   redactJsonTextPreservingSyntax,
   redactPdfBuffer,
 } from '../src/services/fileRedactor.ts';
+import { safeSanitizeDocumentHtml } from '../src/services/safeHtml.ts';
+import { markdownToSafeHtml } from '../src/services/richPdfRenderer.ts';
 import { exportAnalysisReport, toPdfSafeText } from '../src/services/reportExporter.ts';
 import { sanitizeAnalysisPayload } from '../src/services/historySanitizer.ts';
 
@@ -951,4 +954,155 @@ test('v7.0 reportExporter & exportSanitizedDocumentAs: exports valid .docx, .pdf
   );
   assert.ok(safeDocx.fileName.endsWith('.docx'));
   assert.equal(safeDocx.contextAnalysis.leaksFound, 0);
+});
+
+test('v7.1 sensitivityEngine ignoredValues: releases user-whitelisted item in both smart and strict modes', () => {
+  const text = 'Production alert: contact ops@company.io and rotate AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ immediately.';
+
+  const smartRes = analyzeWithContextGuard(text, {
+    smartContextGuard: true,
+    ignoredValues: ['ops@company.io'],
+  });
+  assert.ok(smartRes.redactedText.includes('ops@company.io'));
+  assert.ok(!smartRes.redactedText.includes('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+  assert.equal(smartRes.leaksFound, 0);
+
+  const strictRes = analyzeWithContextGuard(text, {
+    smartContextGuard: false,
+    ignoredValues: ['OPS@COMPANY.IO'],
+  });
+  assert.ok(strictRes.redactedText.includes('ops@company.io'));
+  assert.ok(!strictRes.redactedText.includes('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+});
+
+test('v7.1 lightFileRedactor DOCX: redacts word/comments.xml, scrubs docProps/app.xml, and applies visual token shading', async () => {
+  const jszipMod = await import('jszip');
+  const JSZip = jszipMod.default ?? jszipMod;
+
+  const zip = new JSZip();
+  zip.file(
+    'word/document.xml',
+    `<?xml version="1.0" encoding="UTF-8"?>
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:p><w:r><w:t>Client email: ceo@acmecorp.io</w:t></w:r></w:p>
+      </w:body>
+    </w:document>`
+  );
+  zip.file(
+    'word/comments.xml',
+    `<?xml version="1.0" encoding="UTF-8"?>
+    <w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:comment w:id="1"><w:p><w:r><w:t>Internal key: AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ</w:t></w:r></w:p></w:comment>
+    </w:comments>`
+  );
+  zip.file(
+    'docProps/app.xml',
+    `<?xml version="1.0" encoding="UTF-8"?>
+    <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
+      <Company>Secret Holding Corp</Company>
+      <Manager>Leaked Manager</Manager>
+    </Properties>`
+  );
+
+  const inputBytes = await zip.generateAsync({ type: 'uint8array' });
+  const result = await redactDocxBuffer(inputBytes, {
+    smartContextGuard: true,
+    visualHighlightTokens: true,
+  });
+
+  assert.equal(result.xmlFilesTouched, 2);
+  assert.equal(result.metadataStripped, true);
+
+  const outZip = await JSZip.loadAsync(result.bytes);
+  const outDoc = await outZip.file('word/document.xml')!.async('string');
+  const outComments = await outZip.file('word/comments.xml')!.async('string');
+  const outApp = await outZip.file('docProps/app.xml')!.async('string');
+
+  assert.ok(outDoc.includes('[EMAIL_1]'));
+  assert.ok(outDoc.includes('w:fill="18181B"'));
+  assert.ok(!outDoc.includes('ceo@acmecorp.io'));
+  assert.ok(outComments.includes('[SECRET_1]'));
+  assert.ok(!outComments.includes('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+  assert.ok(!outApp.includes('Secret Holding Corp'));
+  assert.ok(!outApp.includes('Leaked Manager'));
+});
+
+test('v7.1 redactCsvTextPreservingStructure: preserves RFC-4180 quotes, commas, and row/column counts', () => {
+  const csv = [
+    'Name,Email,Notes',
+    '"Nguyen, Tuan Anh",tuananh.ops@acmecorp.io,"Key: AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ, active"',
+    '"Lab Demo",user@example.com,"Public sample row"',
+  ].join('\n');
+
+  const res = redactCsvTextPreservingStructure(csv, { smartContextGuard: true });
+  assert.equal(res.delimiter, ',');
+  assert.equal(res.rows.length, 3);
+  assert.equal(res.rows[1].length, 3);
+  assert.ok(!res.redactedText.includes('tuananh.ops@acmecorp.io'));
+  assert.ok(!res.redactedText.includes('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+  assert.ok(res.redactedText.includes('"Nguyen, Tuan Anh"'));
+  assert.ok(res.redactedText.includes('user@example.com'));
+});
+
+test('v7.1 safeSanitizeDocumentHtml & markdownToSafeHtml: blocks XSS while preserving semantic tables and data images', () => {
+  const hostile =
+    '<h1>Báo cáo</h1><script>alert(1)</script><p onclick="evil()">Safe <a href="javascript:alert(2)">bad</a> <a href="https://example.com">ok</a></p><img src="https://evil.com/p.png" /><img src="data:image/png;base64,iVBORw0KGgo=" alt="ok" />';
+  const clean = safeSanitizeDocumentHtml(hostile);
+  assert.ok(clean.includes('<h1>Báo cáo</h1>'));
+  assert.ok(!clean.includes('<script'));
+  assert.ok(!clean.includes('onclick'));
+  assert.ok(!clean.includes('javascript:'));
+  assert.ok(!clean.includes('evil.com'));
+  assert.ok(clean.includes('data:image/png;base64,iVBORw0KGgo='));
+
+  const mdHtml = markdownToSafeHtml('# Tiêu đề\n\n| Col A | Col B |\n|---|---|\n| 1 | [SECRET_1] |');
+  assert.ok(mdHtml.includes('<table>'));
+  assert.ok(mdHtml.includes('[SECRET_1]'));
+});
+
+test('v7.1 cross-format exportSanitizedDocumentAs (DOCX -> PDF, CSV -> PDF) & PDF manualBoxes', async () => {
+  const jszipMod = await import('jszip');
+  const JSZip = jszipMod.default ?? jszipMod;
+
+  const zip = new JSZip();
+  zip.file(
+    '[Content_Types].xml',
+    `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`
+  );
+  zip.file(
+    '_rels/.rels',
+    `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`
+  );
+  zip.file(
+    'word/document.xml',
+    `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hợp đồng bảo mật: AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ</w:t></w:r></w:p></w:body></w:document>`
+  );
+  const docxBytes = await zip.generateAsync({ type: 'uint8array' });
+  const docxFile = new File([docxBytes.buffer as ArrayBuffer], 'contract.docx', {
+    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  });
+
+  const pdfFromDocx = await exportSanitizedDocumentAs(
+    'Hợp đồng bảo mật: AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ',
+    docxFile,
+    'pdf',
+    { smartContextGuard: true }
+  );
+  assert.equal(pdfFromDocx.fileName, 'safe-contract.pdf');
+  assert.equal(pdfFromDocx.mimeType, 'application/pdf');
+  const pdfAscii = Buffer.from(await pdfFromDocx.blob.arrayBuffer()).toString('latin1');
+  assert.ok(pdfAscii.startsWith('%PDF-'));
+  assert.ok(!pdfAscii.includes('AIzaSyD9xK2mPqR8vL1nW4zT7cB0fH6jY3eU5aQ'));
+
+  // PDF manualBoxes count reflected
+  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  const srcPdf = await PDFDocument.create();
+  const font = await srcPdf.embedFont(StandardFonts.Helvetica);
+  srcPdf.addPage([612, 792]).drawText('Clean signed page', { x: 40, y: 720, size: 11, font });
+  const srcBytes = await srcPdf.save();
+  const withManual = await redactPdfBuffer(srcBytes, {
+    manualBoxes: [{ id: 'm1', pageNum: 1, xRatio: 0.1, yRatio: 0.2, wRatio: 0.3, hRatio: 0.05 }],
+  });
+  assert.equal(withManual.boxesDrawn, 1);
 });

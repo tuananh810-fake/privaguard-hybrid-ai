@@ -35,6 +35,8 @@ export interface ContextGuardOptions {
   /** Explicit originals forced to mask or keep safe by user override */
   forceMaskOriginals?: string[];
   forceKeepOriginals?: string[];
+  /** Session-scoped user-whitelisted exact values (case-insensitive) */
+  ignoredValues?: string[];
 }
 
 export interface ContextGuardAnalysis {
@@ -846,6 +848,7 @@ export function analyzeWithContextGuard(
     existingVault = [],
     forceMaskOriginals = [],
     forceKeepOriginals = [],
+    ignoredValues = [],
   } = options;
 
   const base = redactLocally(rawText, extraSensitiveTerms, enabledCategories, existingVault);
@@ -871,11 +874,23 @@ export function analyzeWithContextGuard(
   }
 
   const docScores = scoreContextText(rawText);
-  const forceMaskSet = new Set(forceMaskOriginals.map((s) => s.trim().toLowerCase()));
-  const forceKeepSet = new Set(forceKeepOriginals.map((s) => s.trim().toLowerCase()));
+  const forceMaskSet = new Set(forceMaskOriginals.map((s) => s.trim().toLowerCase()).filter(Boolean));
+  const forceKeepSet = new Set(
+    [...forceKeepOriginals, ...ignoredValues].map((s) => s.trim().toLowerCase()).filter(Boolean)
+  );
 
-  const entities = candidates.map((entry) =>
-    smartContextGuard
+  const entities = candidates.map((entry) => {
+    const lowerOriginal = entry.original.trim().toLowerCase();
+    if (forceKeepSet.has(lowerOriginal) && !forceMaskSet.has(lowerOriginal)) {
+      return {
+        ...entry,
+        decision: 'KEEP_SAFE_CONTEXT' as SensitivityDecision,
+        confidence: 0.05,
+        reason: 'Whitelisted by user',
+        isHardSecret: false,
+      };
+    }
+    return smartContextGuard
       ? classifySingleEntity(entry, rawText, docScores, forceMaskSet, forceKeepSet)
       : {
           ...entry,
@@ -883,8 +898,8 @@ export function analyzeWithContextGuard(
           confidence: 0.95,
           reason: 'Strict mode — all detected PII masked',
           isHardSecret: entry.category === 'SECRET',
-        }
-  );
+        };
+  });
 
   const maskedByDefault = entities.filter((e) => e.decision !== 'KEEP_SAFE_CONTEXT');
   const keptSafeByContext = entities.filter((e) => e.decision === 'KEEP_SAFE_CONTEXT');

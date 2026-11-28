@@ -6,13 +6,33 @@ import {
   type ContextGuardOptions,
 } from './sensitivityEngine.ts';
 import {
+  redactCsvTextPreservingStructure,
   redactDocxBuffer,
   redactJsonTextPreservingSyntax,
   replaceWithVault,
 } from './lightFileRedactor.ts';
 import { buildCleanPdfBytes, buildNativeDocxBytes } from './reportExporter.ts';
+import {
+  renderRedactedDocxToPdfBytes,
+  renderStructuredTextToPdfBytes,
+} from './richPdfRenderer.ts';
 
-export { redactDocxBuffer, redactJsonTextPreservingSyntax, replaceWithVault };
+export {
+  redactCsvTextPreservingStructure,
+  redactDocxBuffer,
+  redactJsonTextPreservingSyntax,
+  replaceWithVault,
+};
+
+export interface ManualPdfBox {
+  id: string;
+  pageNum: number;
+  xRatio: number;
+  yRatio: number;
+  wRatio: number;
+  hRatio: number;
+  label?: string;
+}
 
 export type SafeDocumentExportFormat = 'original' | 'pdf' | 'docx' | 'md' | 'txt' | 'json';
 
@@ -164,7 +184,12 @@ async function canvasToJpegBytes(canvas: HTMLCanvasElement, quality = 0.9): Prom
 
 export async function redactPdfBuffer(
   buffer: ArrayBuffer | Uint8Array,
-  options: ContextGuardOptions & { maxPages?: number; scale?: number; pdfWorkerSrc?: string } = {}
+  options: ContextGuardOptions & {
+    maxPages?: number;
+    scale?: number;
+    pdfWorkerSrc?: string;
+    manualBoxes?: ManualPdfBox[];
+  } = {}
 ): Promise<{
   bytes: Uint8Array;
   analysis: ContextGuardAnalysis;
@@ -174,6 +199,7 @@ export async function redactPdfBuffer(
 }> {
   const maxPages = options.maxPages ?? 25;
   const scale = options.scale ?? 1.75;
+  const manualBoxes = options.manualBoxes ?? [];
   const isBrowserEnv = typeof window !== 'undefined';
   const legacyPdfjsId = 'pdfjs-dist/legacy/build/pdf.mjs';
   const [{ PDFDocument, StandardFonts, rgb }, pdfjsLib] = await Promise.all([
@@ -273,6 +299,22 @@ export async function redactPdfBuffer(
         boxesDrawn += 1;
       }
 
+      const pageManualBoxes = manualBoxes.filter((mb) => mb.pageNum === p);
+      for (const mb of pageManualBoxes) {
+        const mx = Math.max(0, Math.round(mb.xRatio * canvas.width));
+        const my = Math.max(0, Math.round(mb.yRatio * canvas.height));
+        const mw = Math.max(16, Math.round(mb.wRatio * canvas.width));
+        const mh = Math.max(14, Math.round(mb.hRatio * canvas.height));
+        ctx.fillStyle = '#09090b';
+        ctx.fillRect(mx, my, mw, mh);
+        const fontSize = Math.max(9, Math.min(13, Math.round(mh * 0.45)));
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(mb.label || '[HIDDEN]', mx + 4, my + mh / 2, Math.max(10, mw - 8));
+        boxesDrawn += 1;
+      }
+
       const jpgBytes = await canvasToJpegBytes(canvas, 0.9);
       const embedded = await outPdf.embedJpg(jpgBytes);
       const outPage = outPdf.addPage([baseViewport.width, baseViewport.height]);
@@ -287,7 +329,7 @@ export async function redactPdfBuffer(
     const font = await outPdf.embedFont(StandardFonts.Helvetica);
     for (let p = 0; p < pageCount; p++) {
       const boxes = matchPdfTextItemsToVault(pageItemsList[p], analysis.activeVault);
-      boxesDrawn += boxes.length;
+      boxesDrawn += boxes.length + manualBoxes.filter((mb) => mb.pageNum === p + 1).length;
       const sanitizedPageText = replaceWithVault(pageTexts[p] || '', analysis.activeVault);
       const outPage = outPdf.addPage([612, 792]);
       const asciiSafe = sanitizedPageText.replace(/[^\x20-\x7E\n]/g, ' ');
@@ -319,7 +361,7 @@ function safeOutputName(originalName: string): string {
 
 export async function redactFileLocally(
   file: File,
-  options: ContextGuardOptions & { pdfWorkerSrc?: string } = {}
+  options: ContextGuardOptions & { pdfWorkerSrc?: string; manualBoxes?: ManualPdfBox[] } = {}
 ): Promise<RedactedFileResult> {
   const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const ext = getFileExtension(file.name);
@@ -376,14 +418,28 @@ export async function redactFileLocally(
     };
   }
 
+  if (ext === 'csv' || mime === 'text/csv') {
+    const raw = await file.text();
+    const res = redactCsvTextPreservingStructure(raw, options);
+    const outMime = 'text/csv;charset=utf-8';
+    const blob = new Blob([res.redactedText], { type: outMime });
+    return {
+      blob,
+      fileName: safeOutputName(file.name),
+      mimeType: outMime,
+      formatPreserved: true,
+      contextAnalysis: res.analysis,
+      metadataStripped: false,
+      processingMs: Number(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started).toFixed(1)),
+    };
+  }
+
   const raw = await file.text();
   const analysis = analyzeWithContextGuard(raw, options);
   const outMime =
-    ext === 'csv'
-      ? 'text/csv;charset=utf-8'
-      : ext === 'md'
-        ? 'text/markdown;charset=utf-8'
-        : 'text/plain;charset=utf-8';
+    ext === 'md'
+      ? 'text/markdown;charset=utf-8'
+      : 'text/plain;charset=utf-8';
   const blob = new Blob([analysis.redactedText], { type: outMime });
 
   return {
@@ -399,14 +455,15 @@ export async function redactFileLocally(
 
 /**
  * Exports the user's sanitized document in any desired format:
- * - 'original': preserves the uploaded file's native format (.docx OpenXML, .pdf visual-redacted, .json, .csv, etc.)
- * - 'pdf' / 'docx' / 'md' / 'txt' / 'json': converts sanitized content cleanly into the requested format in RAM.
+ * - 'original': preserves the uploaded file's native format (.docx OpenXML, .pdf visual-redacted, .csv, .json, etc.)
+ * - 'pdf' / 'docx' / 'md' / 'txt' / 'json': converts sanitized content cleanly into the requested format in RAM,
+ *   preserving Word tables/headings/Unicode when converting DOCX/CSV/MD/JSON -> Redacted PDF.
  */
 export async function exportSanitizedDocumentAs(
   rawText: string,
   originalFile: File | null,
   targetFormat: SafeDocumentExportFormat,
-  options: ContextGuardOptions & { pdfWorkerSrc?: string } = {}
+  options: ContextGuardOptions & { pdfWorkerSrc?: string; manualBoxes?: ManualPdfBox[] } = {}
 ): Promise<RedactedFileResult> {
   const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
@@ -414,9 +471,10 @@ export async function exportSanitizedDocumentAs(
     return redactFileLocally(originalFile, options);
   }
 
-  // If user chose the same format as originalFile (.docx or .pdf), preserve exact original layout!
+  const origExt = originalFile ? getFileExtension(originalFile.name) : '';
+
+  // If user chose the same format as originalFile (.docx, .pdf, .json), preserve exact native layout!
   if (originalFile) {
-    const origExt = getFileExtension(originalFile.name);
     if (
       (targetFormat === 'docx' && origExt === 'docx') ||
       (targetFormat === 'pdf' && origExt === 'pdf') ||
@@ -430,6 +488,31 @@ export async function exportSanitizedDocumentAs(
     ? originalFile.name.replace(/\.[^.]+$/, '')
     : `privaguard-safe-${Date.now()}`;
   const safeStem = baseStem.toLowerCase().startsWith('safe-') ? baseStem : `safe-${baseStem}`;
+
+  // Cross-format DOCX -> Redacted PDF (preserves Word headings, tables, bold, lists, images & Unicode!)
+  if (targetFormat === 'pdf' && originalFile && origExt === 'docx') {
+    const buffer = await originalFile.arrayBuffer();
+    const redactedDocx = await redactDocxBuffer(buffer, {
+      ...options,
+      visualHighlightTokens: false,
+    });
+    const pdfBytes = await renderRedactedDocxToPdfBytes(
+      redactedDocx.bytes,
+      safeStem,
+      redactedDocx.analysis.activeVault.length
+    );
+    const mimeType = 'application/pdf';
+    return {
+      blob: new Blob([pdfBytes.buffer as ArrayBuffer], { type: mimeType }),
+      fileName: `${safeStem}.pdf`,
+      mimeType,
+      formatPreserved: true,
+      contextAnalysis: redactedDocx.analysis,
+      metadataStripped: true,
+      processingMs: Number(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started).toFixed(1)),
+    };
+  }
+
   const analysis = analyzeWithContextGuard(rawText, options);
 
   if (targetFormat === 'docx') {
@@ -447,7 +530,29 @@ export async function exportSanitizedDocumentAs(
   }
 
   if (targetFormat === 'pdf') {
-    const bytes = await buildCleanPdfBytes(safeStem, analysis.redactedText);
+    const structuredKind: 'md' | 'csv' | 'json' | 'txt' =
+      origExt === 'csv'
+        ? 'csv'
+        : origExt === 'json'
+          ? 'json'
+          : origExt === 'md' || origExt === 'markdown'
+            ? 'md'
+            : 'txt';
+    const textForPdf =
+      structuredKind === 'csv'
+        ? redactCsvTextPreservingStructure(rawText, options).redactedText
+        : structuredKind === 'json'
+          ? redactJsonTextPreservingSyntax(rawText, options).redactedText
+          : analysis.redactedText;
+    const bytes =
+      typeof document !== 'undefined'
+        ? await renderStructuredTextToPdfBytes(
+            structuredKind,
+            textForPdf,
+            safeStem,
+            analysis.activeVault.length
+          )
+        : await buildCleanPdfBytes(safeStem, textForPdf);
     const mimeType = 'application/pdf';
     return {
       blob: new Blob([bytes.buffer as ArrayBuffer], { type: mimeType }),

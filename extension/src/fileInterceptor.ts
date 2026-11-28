@@ -3,6 +3,7 @@ import {
   type ContextGuardAnalysis,
 } from '../../src/services/sensitivityEngine';
 import {
+  redactCsvTextPreservingStructure,
   redactDocxBuffer,
   redactJsonTextPreservingSyntax,
 } from '../../src/services/lightFileRedactor';
@@ -189,10 +190,24 @@ export async function sanitizeInterceptedFile(
       return;
     }
 
+    if (ext === 'csv' || mime === 'text/csv') {
+      const raw = await file.text();
+      const res = redactCsvTextPreservingStructure(raw, { smartContextGuard });
+      pending.sanitizedFile = new File([res.redactedText], safeFileName(file.name), {
+        type: 'text/csv',
+      });
+      pending.analysis = res.analysis;
+      pending.formatPreserved = true;
+      pending.metadataStripped = false;
+      pending.processing = false;
+      onUpdate();
+      return;
+    }
+
     if (TEXT_EXTS.has(ext) || mime.startsWith('text/')) {
       const raw = await file.text();
       const analysis = analyzeWithContextGuard(raw, { smartContextGuard });
-      const outMime = ext === 'csv' ? 'text/csv' : ext === 'md' ? 'text/markdown' : 'text/plain';
+      const outMime = ext === 'md' ? 'text/markdown' : 'text/plain';
       pending.sanitizedFile = new File([analysis.redactedText], safeFileName(file.name), {
         type: outMime,
       });

@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { History, KeyRound, Moon, Settings, ShieldCheck, Sun, X } from 'lucide-react';
+import { History, KeyRound, Moon, RefreshCw, Settings, ShieldCheck, Sun, X } from 'lucide-react';
 import { loadRemoteSettings, RemoteSettings } from './firebase';
 import { SAMPLE_DOCUMENTS } from './data/samples';
 import {
@@ -39,7 +39,7 @@ import {
   ModeKey,
   NanoAvailability,
 } from './services/hybridAI';
-import type { SafeDocumentExportFormat } from './services/fileRedactor';
+import type { ManualPdfBox, SafeDocumentExportFormat } from './services/fileRedactor';
 import type { ReportExportFormat } from './services/reportExporter';
 import type { NanoDiscoveredEntity, NanoDiscoveryResult } from './services/nanoEntityDiscovery';
 import { classifyDroppedFile, parseDocumentLocally } from './services/documentParser';
@@ -85,6 +85,9 @@ export default function App() {
   const deferredRawText = useDeferredValue(rawText);
 
   const [customTerms, setCustomTerms] = useState('Nguyen Tuan Anh, Sarah Jenkins, David Chen');
+  const [ignoredValues, setIgnoredValues] = useState<string[]>([]);
+  const [manualPdfBoxes, setManualPdfBoxes] = useState<ManualPdfBox[]>([]);
+  const [swUpdateReady, setSwUpdateReady] = useState(false);
   const [categories, setCategories] = useState<CategoryFilter>(DEFAULT_CATEGORY_FILTER);
   const [smartContextGuard, setSmartContextGuard] = useState(true);
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
@@ -200,8 +203,10 @@ export default function App() {
   useEffect(() => {
     const onOnline = () => setIsOnline(true);
     const onOffline = () => setIsOnline(false);
+    const onSwUpdated = () => setSwUpdateReady(true);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
+    window.addEventListener('privaguard:sw-updated', onSwUpdated);
 
     checkChromeNanoAvailability()
       .then((status) => {
@@ -256,6 +261,7 @@ export default function App() {
       if (timerId !== null) window.clearTimeout(timerId);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
+      window.removeEventListener('privaguard:sw-updated', onSwUpdated);
       unsubFirestore?.();
     };
   }, [refreshRemoteConfig, loadHistoryStore]);
@@ -311,14 +317,36 @@ export default function App() {
 
   const extraTerms = useMemo(() => taggedTerms.map((t) => t.text), [taggedTerms]);
 
+  const handleWhitelistValue = useCallback((value: string) => {
+    const clean = value.trim();
+    if (!clean) return;
+    setIgnoredValues((prev) =>
+      prev.some((v) => v.toLowerCase() === clean.toLowerCase()) ? prev : [...prev, clean]
+    );
+  }, []);
+
+  const handleRestoreWhitelisted = useCallback((value: string) => {
+    const target = value.trim().toLowerCase();
+    setIgnoredValues((prev) => prev.filter((v) => v.toLowerCase() !== target));
+  }, []);
+
+  const handleAddManualBox = useCallback((box: ManualPdfBox) => {
+    setManualPdfBoxes((prev) => [...prev, box]);
+  }, []);
+
+  const handleRemoveManualBox = useCallback((id: string) => {
+    setManualPdfBoxes((prev) => prev.filter((b) => b.id !== id));
+  }, []);
+
   const contextAnalysis = useMemo(
     () =>
       analyzeWithContextGuard(deferredRawText, {
         extraSensitiveTerms: taggedTerms,
         enabledCategories: categories,
         smartContextGuard,
+        ignoredValues,
       }),
-    [deferredRawText, taggedTerms, categories, smartContextGuard]
+    [deferredRawText, taggedTerms, categories, smartContextGuard, ignoredValues]
   );
 
   const redaction = useMemo(() => contextAnalysisToRedaction(contextAnalysis), [contextAnalysis]);
@@ -424,7 +452,9 @@ export default function App() {
       setRawText(content);
       setFileMeta(null);
       setOriginalFile(null);
-      setInputTab((tab) => (tab === 'pages' ? 'original' : tab));
+      setIgnoredValues([]);
+      setManualPdfBoxes([]);
+      setInputTab((tab) => (tab === 'preview' ? 'original' : tab));
       setAiDiscoveredEntities([]);
       setRunMetrics(null);
       setResult(null);
@@ -530,6 +560,8 @@ export default function App() {
         setRawText(parsed.text);
         setFileMeta(parsed.meta);
         setOriginalFile(file);
+        setIgnoredValues([]);
+        setManualPdfBoxes([]);
         setAiDiscoveredEntities([]);
         setRunMetrics(null);
         setResult(null);
@@ -538,7 +570,7 @@ export default function App() {
         setExtraFollowUpVault([]);
         setFollowUpStreaming('');
         setSavedNotice(null);
-        setInputTab('original');
+        setInputTab('preview');
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : String(err));
       } finally {
@@ -665,6 +697,7 @@ export default function App() {
         extraSensitiveTerms: [...nanoTerms, ...manualTerms],
         enabledCategories: categories,
         smartContextGuard,
+        ignoredValues,
       });
       const finalRedaction = contextAnalysisToRedaction(finalContext);
 
@@ -734,6 +767,7 @@ export default function App() {
     customTerms,
     categories,
     smartContextGuard,
+    ignoredValues,
     task,
     attachedImage,
     effectiveCloudModel,
@@ -1028,7 +1062,9 @@ export default function App() {
   const handleClearFileMeta = useCallback(() => {
     setFileMeta(null);
     setOriginalFile(null);
-    setInputTab((tab) => (tab === 'pages' ? 'original' : tab));
+    setIgnoredValues([]);
+    setManualPdfBoxes([]);
+    setInputTab((tab) => (tab === 'preview' ? 'original' : tab));
   }, []);
 
   const handleExportSafeDocument = useCallback(
@@ -1042,6 +1078,8 @@ export default function App() {
           extraSensitiveTerms: taggedTerms,
           enabledCategories: categories,
           smartContextGuard,
+          ignoredValues,
+          manualBoxes: manualPdfBoxes,
         });
         const url = URL.createObjectURL(redacted.blob);
         const a = document.createElement('a');
@@ -1055,7 +1093,16 @@ export default function App() {
         setExportingSafeFile(false);
       }
     },
-    [rawText, originalFile, exportingSafeFile, taggedTerms, categories, smartContextGuard]
+    [
+      rawText,
+      originalFile,
+      exportingSafeFile,
+      taggedTerms,
+      categories,
+      smartContextGuard,
+      ignoredValues,
+      manualPdfBoxes,
+    ]
   );
   const handleOpenTechDrawer = useCallback(() => setShowTechDrawer(true), []);
   const handleOpenImageRedactor = useCallback(() => setShowImageRedactor(true), []);
@@ -1096,6 +1143,16 @@ export default function App() {
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
+            {swUpdateReady && (
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="inline-flex items-center gap-1 rounded-md border border-[var(--n-accent-border)] bg-[var(--n-accent-soft)] px-2 py-1 text-[11.5px] font-medium text-[var(--n-accent)] transition hover:opacity-90"
+              >
+                <RefreshCw className="h-3 w-3" />
+                Update ready · Reload
+              </button>
+            )}
             {/* Quiet Status Dot (click to toggle offline simulation) */}
             <button
               type="button"
@@ -1224,6 +1281,12 @@ export default function App() {
             manualTerms={manualTermsList}
             onAddManualTerm={handleAddManualTerm}
             onRemoveManualTerm={handleRemoveManualTerm}
+            ignoredValues={ignoredValues}
+            onWhitelistValue={handleWhitelistValue}
+            onRestoreWhitelisted={handleRestoreWhitelisted}
+            manualPdfBoxes={manualPdfBoxes}
+            onAddManualBox={handleAddManualBox}
+            onRemoveManualBox={handleRemoveManualBox}
             nanoStatus={nanoChecked ? nanoStatus : 'checking'}
             scanningNano={scanningNano}
             nanoScanCompleted={nanoScanCompleted}
